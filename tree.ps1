@@ -31,5 +31,5 @@ function Show-Tree {
     }
 }
 
-Show-Tree -Path "." | Out-File -FilePath "STRUCTURE.md" -Encoding utf8
-Get-Content "STRUCTURE.md"
+Show-Tree -Path "." | Out-File -FilePath "STRUCTURE.txt" -Encoding utf8
+Get-Content "STRUCTURE.txt"

@@ -1,10 +1,9 @@
-# init-structure.ps1 — reads STRUCTURE.md (as produced by tree.ps1) and recreates
-# the directories and empty files on disk. Safe to re-run: skips anything that
-# already exists.
+# init-structure.ps1 — reads STRUCTURE.txt (as produced by tree.ps1) and recreates
+# the directories on disk. Safe to re-run: skips anything that already exists.
 #
 # Usage:  powershell -ExecutionPolicy Bypass -File init-structure.ps1
 
-$structureFile = "STRUCTURE.md"
+$structureFile = "STRUCTURE.txt"
 
 if (-not (Test-Path $structureFile)) {
     Write-Error "Could not find $structureFile in current directory."

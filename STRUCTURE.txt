@@ -12,5 +12,5 @@ Cargo.toml
 init-structure.ps1
 README.md
 requirements.txt
-STRUCTURE.md
+STRUCTURE.txt
 tree.ps1
