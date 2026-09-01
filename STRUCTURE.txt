@@ -11,7 +11,9 @@ src/
 .gitignore
 Cargo.toml
 init-structure.ps1
+init-structure.sh
 README.md
 requirements.txt
 STRUCTURE.txt
 tree.ps1
+tree.sh
