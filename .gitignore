@@ -1,0 +1,51 @@
+# --- Rust ---
+/target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# --- Python (sidecar venv) ---
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Node (if any frontend/tooling ever added) ---
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# --- Model weights / large artifacts ---
+*.gguf
+*.bin
+*.safetensors
+*.pt
+*.pth
+*.onnx
+models/
+db/
+db/*.parquet
+*.lance/
+
+# --- Config / secrets ---
+.env
+.env.*
+config.json
+**/.loomiscli/
+
+# --- OS / editor cruft ---
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+
+# --- Build/log output ---
+*.log
+dist/
+build/
