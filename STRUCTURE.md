@@ -2,11 +2,15 @@
 loadModels/
   loadJina.py
 models/
+prompts/
+  claude.md
 src/
   main.rs
+.gitattributes
 .gitignore
 Cargo.toml
 init-structure.ps1
+README.md
 requirements.txt
 STRUCTURE.md
 tree.ps1
