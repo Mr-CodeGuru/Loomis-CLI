@@ -1,6 +1,7 @@
 ﻿db/
 loadModels/
   loadJina.py
+  loadLlamaQ8.py
 models/
 prompts/
   claude.md
