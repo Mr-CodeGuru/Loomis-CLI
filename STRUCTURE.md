@@ -1,6 +1,11 @@
 ﻿db/
+loadModels/
+  loadJina.py
 models/
+src/
+  main.rs
 .gitignore
+Cargo.toml
 init-structure.ps1
 requirements.txt
 STRUCTURE.md

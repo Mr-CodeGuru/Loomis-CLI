@@ -2,6 +2,7 @@
 /target/
 **/*.rs.bk
 Cargo.lock.bak
+Cargo.toml.orig
 
 # --- Python (sidecar venv) ---
 venv/
@@ -27,7 +28,7 @@ yarn-error.log*
 *.pth
 *.onnx
 models/
-db/
+.cache/
 db/*.parquet
 *.lance/
 

@@ -36,17 +36,7 @@ foreach ($line in $lines) {
         }
         $stack[$level + 1] = $fullPath
     }
-    else {
-        # File — create empty placeholder if missing
-        if (-not (Test-Path $fullPath)) {
-            $parentDir = Split-Path $fullPath -Parent
-            if ($parentDir -and -not (Test-Path $parentDir)) {
-                New-Item -ItemType Directory -Path $parentDir -Force | Out-Null
-            }
-            New-Item -ItemType File -Path $fullPath -Force | Out-Null
-            Write-Output "Created file: $fullPath"
-        }
-    }
+    # Files are skipped intentionally — they come from `git clone`, not this script.
 }
 
 Write-Output "`nDone. Structure recreated from $structureFile."
