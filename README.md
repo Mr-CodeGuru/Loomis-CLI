@@ -18,11 +18,11 @@ CLI at it.
 │  - Owns the persistent Python sidecar process handle    │
 └───────────────┬─────────────────────────────────────────┘
                 │ JSON-lines over stdin/stdout (long-lived process)
-┌───────────────▼─────────────────────────────────────────┐
-│ Python sidecar                                          │
-│  - Loads jina-embeddings-v2-base-code ONCE at startup   │
-│  - Embeds query text on request, nothing else           │
-└─────────────────────────────────────────────────────────┘
+┌───────────────▼────────────────────────────────────────┐
+│ Python sidecar                                         │
+│  - Loads jina-embeddings-v2-base-code ONCE at startup  │
+│  - Embeds query text on request, nothing else          │
+└────────────────────────────────────────────────────────┘
 ```
 
 Why the split: LanceDB has a native Rust crate, so retrieval, config, the CLI shell, and the LLM
@@ -44,7 +44,7 @@ support) — that's the sidecar's entire job, and only that.
 ### 1. Python venv (embedding sidecar dependencies)
 
 ```powershell
-python -m venv .venv
+python -m venv venv
 .\venv\Scripts\Activate.ps1
 pip install -q 'transformers==4.38.2' 'sentence-transformers>2.6.0,<3.0.0' einops 'huggingface-hub>=0.20.0,<0.23.0'
 ```
@@ -68,10 +68,24 @@ weights into `models\` (gitignored, project-local — not your global HF cache) 
 cargo build
 ```
 
-### 4. Start `llama-server` manually
+### 4. Download the inference model
 
-Start it yourself, pointed at your GGUF model, before running LoomisCLI. On first run, LoomisCLI
-will prompt you for the endpoint URL (and API key, if applicable) and persist it to
+```powershell
+python loadModels\loadLlamaQ8.py
+```
+
+Downloads `Llama-3.2-1B-Instruct-Q8_0.gguf` (~1.32GB) directly to `models\` — a fixed,
+predictable path (not nested in HF's cache blob structure), so `llama-server` can be pointed
+at it deterministically.
+
+### 5. Start `llama-server` manually
+
+```powershell
+llama-server -m models\Llama-3.2-1B-Instruct-Q8_0.gguf -c 4096 --port 8080
+```
+
+Start it yourself, before running LoomisCLI. On first run, LoomisCLI will prompt you for the
+endpoint URL (e.g. `http://localhost:8080`) and API key (if applicable), and persist it to
 `%USERPROFILE%\.loomiscli\config.json`. Conversation history is never persisted.
 
 ## Project layout
