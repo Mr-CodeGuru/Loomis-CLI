@@ -16,6 +16,7 @@ loadModels/
 models/
 prompts/
   claude.md
+  create-2026-09-04-18-32.md
 scripts/
   init-structure.ps1
   init-structure.sh
