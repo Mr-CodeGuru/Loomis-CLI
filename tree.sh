@@ -6,7 +6,7 @@
 # Usage:  bash tree.sh
 #     or: chmod +x tree.sh && ./tree.sh
 
-exclude_dirs=(".git" "venv" ".venv" "env" "target" "node_modules" "__pycache__" ".pytest_cache" ".mypy_cache" ".idea" ".vscode" ".cache")
+exclude_dirs=(".git" "venv" ".venv" "env" "lancedb" "target" "node_modules" "__pycache__" ".pytest_cache" ".mypy_cache" ".idea" ".vscode" ".cache")
 exclude_ext=("gguf" "bin" "safetensors" "pt" "pth" "onnx" "parquet" "lance")
 # Directories shown as a placeholder only — contents not recursed into (e.g. HF cache internals)
 collapse_dirs=("models")

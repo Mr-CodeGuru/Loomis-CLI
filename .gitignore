@@ -29,7 +29,7 @@ yarn-error.log*
 *.onnx
 models/
 .cache/
-db/*.parquet
+db/
 *.lance/
 
 # --- Config / secrets ---

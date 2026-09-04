@@ -1,7 +1,7 @@
 # tree.ps1 — prints project structure: all directories, but skips large/binary files by pattern.
 # Usage:  powershell -ExecutionPolicy Bypass -File tree.ps1
 
-$excludeDirs = @('.git', 'venv', '.venv', 'env', 'target', 'node_modules', '__pycache__', '.pytest_cache', '.mypy_cache', '.idea', '.vscode', '.cache')
+$excludeDirs = @('.git', 'venv', '.venv', 'env', 'target', 'lancedb', 'node_modules', '__pycache__', '.pytest_cache', '.mypy_cache', '.idea', '.vscode', '.cache')
 $excludeFileExt = @('.gguf', '.bin', '.safetensors', '.pt', '.pth', '.onnx', '.parquet', '.lance')
 # Directories shown as a placeholder only — contents not recursed into (e.g. HF cache internals)
 $collapseDirs = @('models')

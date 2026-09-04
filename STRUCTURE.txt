@@ -2,6 +2,9 @@
 evals/
   inspectParquet.py
 examples/
+  testLanceDB.rs
+  testLlamaServer.rs
+  testLlamaStreaming.rs
   testParquet.rs
 loadModels/
   loadJina.py
