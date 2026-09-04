@@ -1,9 +1,9 @@
-// examples/testLanceDB.rs
+// examples/convertLanceDB.rs
 // Creates a real LanceDB table from db/embeddings.parquet and runs a vector search against it —
 // the first actual LanceDB usage in this project (everything before this only read parquet
 // schema, never built or queried a table).
 //
-// Usage: cargo run --example testLanceDB
+// Usage: cargo run --example convertLanceDB
 //
 // NOT YET RUN. Confidence note: `lancedb`'s Rust API surface hasn't been reliable in this
 // project so far (see the Cargo.toml feature-flag/version issue already hit). The general shape
