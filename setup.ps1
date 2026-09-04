@@ -1,4 +1,4 @@
-# setup.ps1 - one-shot onboarding for a fresh clone of LoomisCLI.
+﻿# setup.ps1 - one-shot onboarding for a fresh clone of LoomisCLI.
 # Idempotent: every step checks whether it's already done and skips if so.
 # Usage:  powershell -ExecutionPolicy Bypass -File setup.ps1
 
@@ -22,16 +22,20 @@ function Report {
 Write-Host "`n=== LoomisCLI Setup ===`n" -ForegroundColor Magenta
 
 # --- Step 1: directory structure ---
-if ((Test-Path "db") -and (Test-Path "models")) {
-    Report "Directory structure" "SKIPPED" "db/ and models/ already exist."
+if ((Test-Path "dbe") -and (Test-Path "models")) {
+    Report "Directory structure" "SKIPPED" "dbe/ and models/ already exist."
 } else {
     if (Test-Path "STRUCTURE.txt") {
-        powershell -ExecutionPolicy Bypass -File init-structure.ps1 | Out-Null
+        if (Test-Path "scripts\init-structure.ps1") {
+            powershell -ExecutionPolicy Bypass -File scripts\init-structure.ps1 | Out-Null
+        } elseif (Test-Path "init-structure.ps1") {
+            powershell -ExecutionPolicy Bypass -File init-structure.ps1 | Out-Null
+        }
         Report "Directory structure" "OK" "Recreated from STRUCTURE.txt."
     } else {
-        New-Item -ItemType Directory -Path "db" -Force | Out-Null
+        New-Item -ItemType Directory -Path "dbe" -Force | Out-Null
         New-Item -ItemType Directory -Path "models" -Force | Out-Null
-        Report "Directory structure" "OK" "STRUCTURE.txt not found - created db/ and models/ directly."
+        Report "Directory structure" "OK" "STRUCTURE.txt not found - created dbe/ and models/ directly."
     }
 }
 
@@ -97,8 +101,8 @@ try {
     Report "Parquet schema read (Rust)" "FAILED" $_.Exception.Message
 }
 
-if (Test-Path "db\lancedb\chunks.lance") {
-    Report "LanceDB table" "SKIPPED" "db\lancedb\chunks.lance already exists."
+if (Test-Path "dbe\lancedb\chunks.lance") {
+    Report "LanceDB table" "SKIPPED" "dbe\lancedb\chunks.lance already exists."
 } else {
     try {
         cargo run --example convertLanceDB 2>&1 | Out-Null

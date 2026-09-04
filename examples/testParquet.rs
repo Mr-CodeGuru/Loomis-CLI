@@ -1,39 +1,53 @@
-// examples/inspect_parquet.rs
-// Rust-only equivalent of loadModels/inspect_parquet.py — reads db/embeddings.parquet's
-// schema using the `parquet` crate directly, no Python involved.
-//
-// NOT YET RUN — verify the `parquet` crate's current API against its docs if this doesn't
-// compile as-is; API surface for reading schema/row groups has shifted across versions.
-//
-// Usage: cargo run --example testParquet --release
+﻿// examples/testParquet.rs
+// Rust-only equivalent of evals/inspectParquet.py — reads dbe/embeddings.parquet's
+// schema and first row using the parquet crate, without Python.
 
+use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::file::reader::{FileReader, SerializedFileReader};
 use std::fs::File;
 use std::path::PathBuf;
- 
+
 fn main() -> anyhow::Result<()> {
-    let path: PathBuf = std::env::current_dir()?.join("db").join("embeddings.parquet");
-    println!("Reading schema from: {}", path.display());
- 
+    let root = std::env::current_dir()?;
+    let base_dir = if root.join("dbe").exists() {
+        root.join("dbe")
+    } else {
+        root.join("db")
+    };
+    let path: PathBuf = base_dir.join("embeddings.parquet");
+    println!("Reading parquet from: {}\n", path.display());
+
     let file = File::open(&path)?;
     let reader = SerializedFileReader::new(file)?;
-    let metadata = reader.metadata();
- 
-    println!("\n=== Schema ===");
-    let schema = metadata.file_metadata().schema();
-    schema.get_fields().iter().for_each(|field| {
-        if field.is_primitive() {
-            println!("  {}: {:?}", field.name(), field.get_physical_type());
-        } else {
-            println!("  {}: (complex/group type — {:?})", field.name(), field.get_basic_info().logical_type_ref());
+    let file_metadata = reader.metadata().file_metadata();
+
+    println!("=== Schema (Parquet format) ===");
+    for (i, col) in file_metadata.schema().get_fields().iter().enumerate() {
+        println!("  [{}] {}: {:?}", i, col.name(), col.get_basic_info().repetition());
+    }
+
+    println!("\n=== Row Count ===");
+    println!("  Total rows: {}", file_metadata.num_rows());
+    println!("  Row groups: {}", reader.metadata().num_row_groups());
+
+    let file = File::open(&path)?;
+    let builder = ParquetRecordBatchReaderBuilder::try_new(file)?;
+    let arrow_schema = builder.schema().clone();
+
+    println!("\n=== Schema (Arrow format) ===");
+    for field in arrow_schema.fields() {
+        println!("  {}: {}", field.name(), field.data_type());
+    }
+
+    let mut reader = builder.with_batch_size(1).build()?;
+    if let Some(Ok(batch)) = reader.next() {
+        println!("\n=== Sample row (first row, Arrow RecordBatch) ===");
+        for (i, field) in arrow_schema.fields().iter().enumerate() {
+            let col = batch.column(i);
+            println!("  {}: len={}, null_count={}", field.name(), col.len(), col.null_count());
         }
-    });
- 
-    println!("\n=== Row count ===");
-    println!("  {}", metadata.file_metadata().num_rows());
- 
-    println!("\n=== Row groups ===");
-    println!("  {}", metadata.num_row_groups());
- 
+    }
+
+    println!("\nPASS: parquet schema and sample row read successfully in Rust.");
     Ok(())
 }

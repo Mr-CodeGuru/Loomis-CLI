@@ -1,27 +1,53 @@
-﻿db/
+﻿dbe/
 evals/
   inspectParquet.py
 examples/
-  testLanceDB.rs
+  checkDuplicateColumns.rs
+  convertLanceDB.rs
+  testLanceDbMethods.rs
   testLlamaServer.rs
   testLlamaStreaming.rs
   testParquet.rs
+  testRetrievalPipeline.rs
+  testSidecarIpc.rs
 loadModels/
   loadJina.py
   loadLlamaQ8.py
 models/
 prompts/
   claude.md
+scripts/
+  init-structure.ps1
+  init-structure.sh
+  tree.ps1
+  tree.sh
+sidecar/
+  embed.py
 src/
+  cli/
+    commands.rs
+    mod.rs
+    session.rs
+  db/
+    mod.rs
+    store.rs
+  llm/
+    client.rs
+    mod.rs
+    prompt.rs
+  sidecar/
+    client.rs
+    mod.rs
+    process.rs
+  config.rs
+  lib.rs
   main.rs
 .gitattributes
 .gitignore
 Cargo.lock
 Cargo.toml
-init-structure.ps1
-init-structure.sh
 README.md
 requirements.txt
+setup.ps1
+setup.sh
 STRUCTURE.txt
-tree.ps1
-tree.sh

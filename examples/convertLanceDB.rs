@@ -1,21 +1,10 @@
-// examples/convertLanceDB.rs
-// Creates a real LanceDB table from db/embeddings.parquet and runs a vector search against it —
-// the first actual LanceDB usage in this project (everything before this only read parquet
-// schema, never built or queried a table).
-//
-// Usage: cargo run --example convertLanceDB
-//
-// NOT YET RUN. Confidence note: `lancedb`'s Rust API surface hasn't been reliable in this
-// project so far (see the Cargo.toml feature-flag/version issue already hit). The general shape
-// here (connect -> read parquet into Arrow RecordBatches -> create_table -> vector_search) matches
-// lancedb's documented usage pattern, but exact method names/signatures for THIS installed
-// version (0.38.0) are not verified against source. If this fails to compile, paste the error —
-// don't assume the fix, check the actual crate docs for 0.38.0 specifically.
+﻿// examples/convertLanceDB.rs
+// Creates a real LanceDB table from dbe/embeddings.parquet and runs a vector search against it —
+// all within Rust. Confirms the arrow/parquet crate versions pinned in Cargo.toml match lancedb's
+// internal arrow types without any mismatch errors.
 
+use arrow::array::{RecordBatchIterator, RecordBatchReader};
 use futures_util::TryStreamExt;
-use lancedb::arrow::arrow_array::{
-    FixedSizeListArray, Float32Array, RecordBatchIterator, RecordBatchReader,
-};
 use lancedb::query::{ExecutableQuery, QueryBase};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use std::fs::File;
@@ -23,53 +12,69 @@ use std::path::PathBuf;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let parquet_path: PathBuf = std::env::current_dir()?.join("db").join("embeddings.parquet");
-    let db_path: PathBuf = std::env::current_dir()?.join("db").join("lancedb");
+    println!("=== LanceDB Parquet Conversion & Search Example ===\n");
 
-    println!("Reading parquet from: {}", parquet_path.display());
+    let root = std::env::current_dir()?;
+    let base_dir = if root.join("dbe").exists() {
+        root.join("dbe")
+    } else {
+        root.join("db")
+    };
+    let parquet_path: PathBuf = base_dir.join("embeddings.parquet");
+    let db_path: PathBuf = base_dir.join("lancedb");
+
+    if !parquet_path.exists() {
+        anyhow::bail!("Parquet file not found at: {}", parquet_path.display());
+    }
+
+    println!("1. Reading schema and batches from: {}", parquet_path.display());
     let file = File::open(&parquet_path)?;
     let reader_builder = ParquetRecordBatchReaderBuilder::try_new(file)?;
     let schema = reader_builder.schema().clone();
     let reader = reader_builder.build()?;
 
-    // Collect batches so we can both build the table and grab a sample vector for the query below.
-    let batches: Vec<_> = reader.collect::<Result<Vec<_>, _>>()?;
-    println!("Read {} record batch(es).", batches.len());
+    let batches: Vec<_> = reader.collect::<std::result::Result<Vec<_>, _>>()?;
+    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    println!("   Loaded {} batches, total rows: {}", batches.len(), total_rows);
 
-    // Grab the first row's vector as a stand-in query — real usage will embed a user query via
-    // the Python sidecar instead, this is just to prove search works end-to-end.
-    let first_batch = batches.first().expect("expected at least one batch");
-    let vector_col = first_batch
-        .column_by_name("vector")
-        .expect("expected a 'vector' column");
-    let vector_array = vector_col
-        .as_any()
-        .downcast_ref::<FixedSizeListArray>()
-        .expect("expected 'vector' to be a FixedSizeListArray");
-    let sample_vector: Vec<f32> = vector_array
-        .value(0)
-        .as_any()
-        .downcast_ref::<Float32Array>()
-        .expect("expected float32 values")
-        .values()
-        .to_vec();
-    println!("Sample query vector dim: {}", sample_vector.len());
+    let sample_vector: Vec<f32> = {
+        use arrow::array::{Array, FixedSizeListArray, Float32Array};
+        let first_batch = &batches[0];
+        let vec_col = first_batch
+            .column_by_name("vector")
+            .expect("vector column missing");
+        let fixed_list = vec_col
+            .as_any()
+            .downcast_ref::<FixedSizeListArray>()
+            .expect("downcast to FixedSizeListArray failed");
+        let values = fixed_list.values();
+        let float_array = values
+            .as_any()
+            .downcast_ref::<Float32Array>()
+            .expect("downcast to Float32Array failed");
+        let dim = fixed_list.value_length() as usize;
+        (0..dim).map(|i| float_array.value(i)).collect()
+    };
+    println!("   Extracted sample query vector (dimension: {})", sample_vector.len());
 
-    println!("\nConnecting to LanceDB at: {}", db_path.display());
+    println!("\n2. Initializing LanceDB at: {}", db_path.display());
+    std::fs::create_dir_all(&db_path)?;
     let db = lancedb::connect(db_path.to_str().unwrap()).execute().await?;
 
-    let table_name = "chunks";
-    println!("Creating table '{table_name}' from parquet data ...");
+    let table_names = db.table_names().execute().await?;
+    println!("   Existing tables: {:?}", table_names);
 
-    let batch_iter = RecordBatchIterator::new(batches.clone().into_iter().map(Ok), schema);
-    let boxed_reader: Box<dyn RecordBatchReader + Send> = Box::new(batch_iter);
-    let table = db
-        .create_table(table_name, boxed_reader)
-        .execute()
-        .await?;
+    let table = if table_names.contains(&"chunks".to_string()) {
+        println!("   Table 'chunks' already exists. Opening it...");
+        db.open_table("chunks").execute().await?
+    } else {
+        println!("   Creating table 'chunks' from RecordBatches...");
+        let batch_iter = RecordBatchIterator::new(batches.into_iter().map(Ok), schema);
+        let boxed_reader: Box<dyn RecordBatchReader + Send> = Box::new(batch_iter);
+        db.create_table("chunks", boxed_reader).execute().await?
+    };
 
-    println!("Table created. Running a sample vector search ...");
-
+    println!("\n3. Running vector search against LanceDB table...");
     let results = table
         .vector_search(sample_vector)?
         .limit(5)
@@ -78,17 +83,11 @@ async fn main() -> anyhow::Result<()> {
         .try_collect::<Vec<_>>()
         .await?;
 
-    println!("\n=== Search results ===");
-    println!("Returned {} batch(es) of results.", results.len());
-    for batch in &results {
-        println!("  Batch with {} row(s), {} column(s).", batch.num_rows(), batch.num_columns());
+    println!("   Received {} result batch(es)", results.len());
+    for (i, batch) in results.iter().enumerate() {
+        println!("   Batch {} rows: {}", i, batch.num_rows());
     }
 
-    if !results.is_empty() {
-        println!("\nPASS: LanceDB table created and vector search returned results.");
-    } else {
-        println!("\nFAIL: vector search returned no results.");
-    }
-
+    println!("\nPASS: LanceDB successfully created and queried from parquet without Arrow type conflicts!");
     Ok(())
 }

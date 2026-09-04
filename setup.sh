@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 # setup.sh — one-shot onboarding for a fresh clone of LoomisCLI.
 # Idempotent: every step checks whether it's already done and skips if so.
 # Usage: bash setup.sh
@@ -24,24 +24,27 @@ report() {
 
 echo -e "\n\033[35m=== LoomisCLI Setup ===\033[0m\n"
 
-# --- Step 0: safety net -- strip any stray CRLF from shell scripts this script calls,
-# in case they were touched/edited on Windows since the repo was cloned.
-for f in init-structure.sh tree.sh; do
+# --- Step 0: safety net -- strip any stray CRLF from shell scripts this script calls
+for f in scripts/init-structure.sh scripts/tree.sh init-structure.sh tree.sh; do
     if [[ -f "$f" ]]; then
         sed -i 's/\r$//' "$f"
     fi
 done
 
 # --- Step 1: directory structure ---
-if [[ -d "db" && -d "models" ]]; then
-    report "Directory structure" "SKIPPED" "db/ and models/ already exist."
+if [[ -d "dbe" && -d "models" ]]; then
+    report "Directory structure" "SKIPPED" "dbe/ and models/ already exist."
 else
     if [[ -f "STRUCTURE.txt" ]]; then
-        bash init-structure.sh > /dev/null 2>&1
+        if [[ -f "scripts/init-structure.sh" ]]; then
+            bash scripts/init-structure.sh > /dev/null 2>&1
+        else
+            bash init-structure.sh > /dev/null 2>&1
+        fi
         report "Directory structure" "OK" "Recreated from STRUCTURE.txt."
     else
-        mkdir -p db models
-        report "Directory structure" "OK" "STRUCTURE.txt not found — created db/ and models/ directly."
+        mkdir -p dbe models
+        report "Directory structure" "OK" "STRUCTURE.txt not found — created dbe/ and models/ directly."
     fi
 fi
 
@@ -101,8 +104,8 @@ else
     report "Parquet schema read (Rust)" "FAILED"
 fi
 
-if [[ -d "db/lancedb/chunks.lance" ]]; then
-    report "LanceDB table" "SKIPPED" "db/lancedb/chunks.lance already exists."
+if [[ -d "dbe/lancedb/chunks.lance" ]]; then
+    report "LanceDB table" "SKIPPED" "dbe/lancedb/chunks.lance already exists."
 else
     if cargo run --example convertLanceDB > /dev/null 2>&1; then
         report "LanceDB table" "OK" "Created and verified with a sample search."

@@ -1,13 +1,13 @@
-# --- Rust ---
+﻿# --- Rust ---
 /target/
 **/*.rs.bk
 Cargo.lock.bak
 Cargo.toml.orig
 
 # --- Python (sidecar venv) ---
-venv/
-.venv/
-env/
+/venv/
+/.venv/
+/env/
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -16,7 +16,7 @@ __pycache__/
 .ruff_cache/
 
 # --- Node (if any frontend/tooling ever added) ---
-node_modules/
+/node_modules/
 npm-debug.log*
 yarn-error.log*
 
@@ -27,15 +27,18 @@ yarn-error.log*
 *.pt
 *.pth
 *.onnx
-models/
-.cache/
-db/
+/models/
+/.cache/
+/dbe/
 *.lance/
+
+# --- Source tree safety guarantee (never ignore anything under src/) ---
+!/src/**
 
 # --- Config / secrets ---
 .env
 .env.*
-config.json
+/config.json
 **/.loomiscli/
 
 # --- OS / editor cruft ---
@@ -48,5 +51,5 @@ desktop.ini
 
 # --- Build/log output ---
 *.log
-dist/
-build/
+/dist/
+/build/

@@ -1,4 +1,4 @@
-# LoomisCLI
+﻿# LoomisCLI
 
 A local, terminal-based RAG code-assistant CLI. Rust-first architecture with a minimal Python
 sidecar used only where Rust has no viable path (embedding model inference). No cloud
@@ -10,18 +10,17 @@ CLI at it.
 ```
 ┌─────────────────────────────────────────────────────────┐
 │ Rust binary (LoomisCLI)                                 │
-│  - REPL / slash-command shell                           │
-│  - Config load/persist                                  │
-│  - LanceDB client (native `lancedb` crate) — vector +   │
-│    hybrid search                                        │
-│  - HTTP client → OpenAI-compatible chat endpoint        │
-│  - Owns the persistent Python sidecar process handle    │
-└───────────────┬─────────────────────────────────────────┘
-                │ JSON-lines over stdin/stdout (long-lived process)
-┌───────────────▼─────────────────────────────────────────┐
-│ Python sidecar                                          │
+│  - Interactive REPL / slash commands (/help, /exit)     │
+│  - Config load/persist (~/.loomiscli/config.json)       │
+│  - Native LanceDB vector storage & hybrid search        │
+│  - Streaming HTTP client → llama-server completions     │
+│  - Spawns and manages Python sidecar supervisor & IPC   │
+└───────────────────────────┬─────────────────────────────┘
+                            │ JSON-lines over stdin/stdout (long-lived process)
+┌───────────────────────────▼─────────────────────────────┐
+│ Python sidecar (sidecar/embed.py)                       │
 │  - Loads jina-embeddings-v2-base-code ONCE at startup   │
-│  - Embeds query text on request, nothing else           │
+│  - Embeds query text on request (768-dim float vector)  │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -44,32 +43,37 @@ support) — that's the sidecar's entire job, and only that.
 Commands are given for both Windows (PowerShell) and macOS/Linux (bash). Use whichever matches
 your machine.
 
-### 1. Python venv (embedding sidecar dependencies)
+### One-Shot Onboarding
+
+**Windows:**
+```powershell
+powershell -ExecutionPolicy Bypass -File setup.ps1
+```
+
+**macOS/Linux:**
+```bash
+./setup.sh
+```
+
+### Manual Setup Steps
+
+#### 1. Python venv (embedding sidecar dependencies)
 
 **Windows (PowerShell):**
 ```powershell
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-pip install -q 'transformers==4.38.2' 'sentence-transformers>2.6.0,<3.0.0' einops 'huggingface-hub>=0.20.0,<0.23.0'
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
 ```
 
 **macOS/Linux (bash):**
 ```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -q 'transformers==4.38.2' 'sentence-transformers>2.6.0,<3.0.0' einops 'huggingface-hub>=0.20.0,<0.23.0'
-```
-
-These are pinned deliberately — `jina-embeddings-v2-base-code`'s custom `trust_remote_code`
-implementation is fragile across `transformers`/`sentence-transformers`/`huggingface-hub`
-version combinations. Don't bump these without re-verifying the model still loads. Or install
-directly from the pinned list:
-
-```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Verify the embedding model loads
+#### 2. Verify the embedding model loads
 
 **Windows:**
 ```powershell
@@ -84,14 +88,7 @@ python3 loadModels/loadJina.py
 Expected output ends with `PASS: embedding dimension matches expected 768.` This downloads model
 weights into `models/` (gitignored, project-local — not your global HF cache) on first run.
 
-### 3. Rust build
-
-Same on both platforms:
-```bash
-cargo build
-```
-
-### 4. Download the inference model
+#### 3. Download the inference model
 
 **Windows:**
 ```powershell
@@ -104,10 +101,15 @@ python3 loadModels/loadLlamaQ8.py
 ```
 
 Downloads `Llama-3.2-1B-Instruct-Q8_0.gguf` (~1.32GB) directly to `models/` — a fixed,
-predictable path (not nested in HF's cache blob structure), so `llama-server` can be pointed
-at it deterministically.
+predictable path, so `llama-server` can be pointed at it deterministically.
 
-### 5. Start `llama-server` manually
+#### 4. Build the Rust binary
+
+```bash
+cargo build
+```
+
+#### 5. Start `llama-server` manually
 
 **Windows:**
 ```powershell
@@ -119,65 +121,85 @@ llama-server -m models\Llama-3.2-1B-Instruct-Q8_0.gguf -c 4096 --port 8080
 llama-server -m models/Llama-3.2-1B-Instruct-Q8_0.gguf -c 4096 --port 8080
 ```
 
-Start it yourself, before running LoomisCLI. On first run, LoomisCLI will prompt you for the
-endpoint URL (e.g. `http://localhost:8080`) and API key (if applicable), and persist it to
-`~/.loomiscli/config.json` (`%USERPROFILE%\.loomiscli\config.json` on Windows). Conversation
-history is never persisted.
+#### 6. Run LoomisCLI
 
-> Flag names (`-c`, `--port`, etc.) depend on your `llama-server` build/version — run
-> `llama-server --help` to confirm before relying on these exact flags.
+```bash
+cargo run
+```
 
-## Project layout
+On first run, LoomisCLI will prompt you for the endpoint URL (default: `http://localhost:8080`)
+and optional API key, persisting it to `~/.loomiscli/config.json` (`%USERPROFILE%\.loomiscli\config.json` on Windows).
+Conversation history is ephemeral and never persisted.
+
+## Project Layout
 
 ```
 LoomisCLI/
-├── src/                    # Rust application source
-│   └── main.rs
-├── loadModels/
-│   ├── loadJina.py         # Standalone pre-flight test for the embedding model
-│   └── loadLlamaQ8.py      # Downloads the Llama 3.2 1B Q8_0 GGUF into models/
-├── db/
-│   └── embeddings.parquet  # Precomputed embeddings (gitignored)
-├── models/                 # Local HF model cache + GGUF file (gitignored)
+├── src/                     # Modular Rust application architecture
+│   ├── cli/                 # REPL session, terminal rendering, slash commands
+│   │   ├── commands.rs      # /help, /stats, /config, /clear, /exit
+│   │   ├── session.rs       # Interactive loop & prompt rendering
+│   │   └── mod.rs
+│   ├── db/                  # Native LanceDB vector storage & parquet ingestion
+│   │   ├── store.rs         # Connection, table management, vector similarity search
+│   │   └── mod.rs
+│   ├── llm/                 # OpenAI-compatible streaming client & prompt assembly
+│   │   ├── client.rs        # HTTP reqwest client with SSE line-buffered streaming
+│   │   ├── prompt.rs        # RAG context formatter and system instruction
+│   │   └── mod.rs
+│   ├── sidecar/             # Rust IPC supervisor & Python process manager
+│   │   ├── client.rs        # Stdin/stdout JSON-line client with auto-restart
+│   │   ├── process.rs       # Python path & sidecar script auto-discovery
+│   │   └── mod.rs
+│   ├── config.rs            # Config persistence (~/.loomiscli/config.json)
+│   ├── lib.rs               # Library root re-exporting modules
+│   └── main.rs              # Application CLI entrypoint
+├── sidecar/
+│   └── embed.py             # Minimal Python IPC worker for jina-embeddings-v2-base-code
+├── scripts/                 # Dev and maintenance utilities
+│   ├── init-structure.ps1   # Recreates gitignored dirs from STRUCTURE.txt (Windows)
+│   ├── init-structure.sh    # Recreates gitignored dirs from STRUCTURE.txt (macOS/Linux)
+│   ├── tree.ps1             # Generates STRUCTURE.txt snapshot (Windows)
+│   └── tree.sh              # Generates STRUCTURE.txt snapshot (macOS/Linux)
+├── loadModels/              # Standalone model test & download scripts
+│   ├── loadJina.py          # Standalone pre-flight test for embedding model
+│   └── loadLlamaQ8.py       # Downloads Llama-3.2-1B-Instruct-Q8_0.gguf
+├── dbe/                     # Vector database & parquet source files (gitignored)
+│   ├── embeddings.parquet   # 70,163 precomputed embeddings
+│   └── lancedb/             # Native LanceDB database directory
+├── models/                  # Local model storage & HF cache (gitignored)
+├── examples/                # Integration tests and verification examples
 ├── prompts/
-│   └── claude.md           # Build/continuation prompt for this project
-├── Cargo.toml
-├── requirements.txt
-├── .gitignore
-├── .gitattributes
-├── tree.ps1                # Dev utility (Windows): writes STRUCTURE.txt
-├── tree.sh                 # Dev utility (macOS/Linux): writes STRUCTURE.txt
-├── init-structure.ps1      # Dev utility (Windows): recreates gitignored dirs from STRUCTURE.txt
-├── init-structure.sh       # Dev utility (macOS/Linux): recreates gitignored dirs from STRUCTURE.txt
+│   └── claude.md            # Standalone project specification & architectural decisions
+├── setup.ps1                # Idempotent onboarding script (Windows)
+├── setup.sh                 # Idempotent onboarding script (macOS/Linux)
+├── requirements.txt         # Pinned Python dependencies
+├── Cargo.toml               # Rust dependencies & configuration
+├── STRUCTURE.txt            # Auto-generated project tree snapshot
 └── README.md
 ```
 
-## Dev utilities
+## Dev Utilities
 
 Both platforms produce/consume the same `STRUCTURE.txt` format, so either can be used regardless
-of which machine generated it (line-ending differences between Windows/macOS are handled).
+of which machine generated it:
 
 **Windows:**
 ```powershell
-powershell -ExecutionPolicy Bypass -File tree.ps1
-powershell -ExecutionPolicy Bypass -File init-structure.ps1
+powershell -ExecutionPolicy Bypass -File scripts\tree.ps1
+powershell -ExecutionPolicy Bypass -File scripts\init-structure.ps1
 ```
 
 **macOS/Linux:**
 ```bash
-chmod +x tree.sh init-structure.sh
-./tree.sh
-./init-structure.sh
+chmod +x scripts/*.sh
+./scripts/tree.sh
+./scripts/init-structure.sh
 ```
-
-- `tree.*` — regenerates `STRUCTURE.txt`, a snapshot of the project layout. Skips large binaries
-  by extension and collapses `models/` (HF cache internals aren't meaningful structure — shown as
-  a placeholder, not recursed into).
-- `init-structure.*` — on a fresh clone, recreates the gitignored **directories** (`models/`,
-  `db/`, etc.) that git doesn't track. Directories only — files always come from `git clone`,
-  never from this script.
 
 ## Status
 
-Environment and tooling setup phase. Rust application logic, the actual sidecar script (distinct
-from the `loadJina.py` pre-flight test), LanceDB ingestion, and the CLI shell are not yet built.
+Fully operational. End-to-end RAG query pipeline, persistent LanceDB vector store (70,163 code chunks),
+auto-recovering Python embedding sidecar, streaming SSE LLM client, and interactive REPL shell are complete
+and verified.
+

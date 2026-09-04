@@ -207,7 +207,44 @@ built," not "not yet decided."
 
 ---
 
-## 7. Guardrails — apply throughout, don't relax these for convenience
+## 7. Onboarding automation (setup.ps1 / setup.sh)
+
+Both scripts exist for a fresh clone to get from zero to a ready environment. Idempotent — every
+step checks a concrete on-disk signal (directory existence, `.venv` presence, the HF cache folder,
+the `.gguf` file, `chunks.lance`) before deciding to skip, not just "did this run before."
+Step order: directory structure -> Python venv/deps -> embedding model -> LLM model -> Rust build
+-> parquet/LanceDB sanity checks -> **hard wait for the user to start `llama-server` manually**
+(prints the exact command, blocks on Enter, does not guess readiness) -> connectivity test ->
+summary table of OK/SKIPPED/FAILED per step.
+
+- **`setup.ps1` — CONFIRMED WORKING** on the actual Windows dev machine, full run, correct
+  skip-detection on a second run.
+- **`setup.sh` — NOT YET VALIDATED on a real, clean macOS/Linux machine.** It was run once via
+  WSL against the *same Windows-built project folder* (shared `.venv`, `target/`, `models/`) and
+  failed — but that failure was caused by cross-environment contamination (a Windows-layout
+  `.venv` is structurally incompatible with Linux's venv layout; `target/` had Windows-compiled
+  artifacts), not a bug in the script itself. Two real bugs *were* found and fixed during this:
+  the script had CRLF line endings (bash doesn't tolerate `\r`, now fixed and `.gitattributes` has
+  an explicit `*.sh text eol=lf` rule to prevent recurrence), and it now self-heals CRLF on the
+  other shell scripts it calls (`init-structure.sh`, `tree.sh`) as a defensive first step.
+  **Still needs an actual test on a genuine clean environment** (a real Mac/Linux machine, or a
+  WSL-native clone at a WSL-native path like `~/LoomisCLI`, not `/mnt/c/...`) before it can be
+  considered confirmed — the WSL-into-Windows-folder run doesn't count as a valid test of it.
+
+---
+
+## 8. Retrieval quality — not evaluated
+
+Everything confirmed so far proves the *mechanism* works (data goes into LanceDB, a search
+returns rows, `llama-server` returns real completions). **Whether the hybrid vector+FTS search
+actually returns good, relevant results for real queries has not been evaluated at all** — the
+only search performed used a placeholder query (a row's own vector), which trivially returns
+itself as the top match and proves nothing about real-world retrieval quality. This remains
+untested until real queries (via the sidecar, once built) are tried against the corpus.
+
+---
+
+## 9. Guardrails — apply throughout, don't relax these for convenience
 
 - Don't re-attempt Rust-only embedding inference (§3.1) without a new, explicit decision to
   revisit it.
