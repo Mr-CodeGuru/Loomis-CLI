@@ -1,17 +1,17 @@
 """
 loadLlamaQ8.py — downloads Llama-3.2-1B-Instruct-Q8_0.gguf into the project's shared
-models\ directory (same location loadJina.py uses).
+models\\ directory (same location loadJina.py uses).
 
 This is a download-only script. It does NOT load/run the model — that's llama-server's
 job, started separately and pointed at the downloaded file.
 
-Location: LoomisCLI\loadModels\loadLlamaQ8.py
+Location: LoomisCLI\\loadModels\\loadLlamaQ8.py
 Usage (with venv activated, from project root):
-    python loadModels\loadLlamaQ8.py
+    python loadModels\\loadLlamaQ8.py
 """
 
-from pathlib import Path
 import os
+from pathlib import Path
 
 # Same resolution pattern as loadJina.py — portable, not hardcoded, and self-contained
 # (doesn't rely on any $env:HF_HOME set in the shell session).
