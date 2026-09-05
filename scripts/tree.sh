@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # scripts/tree.sh — macOS/Linux equivalent of tree.ps1
+# Usage: bash scripts/tree.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -7,7 +8,7 @@ SRC_DIR="$ROOT_DIR/src"
 output_file="$ROOT_DIR/STRUCTURE.txt"
 
 exclude_dirs='^(\.git|venv|\.venv|env|target|lancedb|node_modules|__pycache__|\.pytest_cache|\.mypy_cache|\.idea|\.vscode|\.cache)$'
-exclude_file_ext='\.(gguf|bin|safetensors|pt|pth|onnx|parquet|lance)$'
+exclude_file_ext='\.(gguf|bin|safetensors|pt|pth|onnx|parquet|lance|DS_Store)$'
 collapse_dirs='^(models|dbe)$'
 
 show_tree() {
