@@ -1,68 +1,45 @@
 ﻿use anyhow::Result;
 use std::io::{self, Write};
 use crate::config::AppConfig;
-use crate::db::VectorStore;
-use crate::llm::{build_rag_messages, fallback_classify_code_intent, ChatMessage, CodeIntent, LlmClient};
-use crate::sidecar::SidecarClient;
+use crate::core::LoomisCore;
+use crate::llm::CodeIntent;
 use super::commands::CommandHandler;
 use super::formatter::StreamingCodeFormatter;
 
 pub struct ReplSession {
-    config: AppConfig,
-    vector_store: VectorStore,
-    sidecar: SidecarClient,
-    llm: LlmClient,
-    history: Vec<ChatMessage>,
+    pub core: LoomisCore,
 }
 
 impl ReplSession {
     pub async fn init(config: AppConfig) -> Result<Self> {
         println!("\nInitializing LoomisCLI...");
 
-        // 1. LanceDB vector store
-        let vector_store = VectorStore::connect_or_create().await?;
-
-        // 2. Python sidecar IPC
         print!("Booting Python embedding sidecar... ");
         io::stdout().flush()?;
-        let sidecar = match SidecarClient::new().await {
+        let core = match LoomisCore::init(config).await {
             Ok(c) => {
                 println!("ready.");
                 c
             }
             Err(e) => {
                 println!("failed!");
-                eprintln!("[FATAL] Could not launch Python sidecar: {e}");
-                eprintln!("        Run .\\setup.ps1 (or bash setup.sh) to verify Python venv & model download.");
+                eprintln!("[FATAL] Could not initialize LoomisCore: {e}");
                 return Err(e);
             }
         };
 
-        // 3. LLM client
-        let llm = LlmClient::new(
-            config.endpoint_url.clone(),
-            config.model.clone(),
-            config.api_key.clone(),
-        );
-
         // Pre-flight check to verify LLM server connectivity
-        print!("Testing LLM endpoint ({}) ... ", config.endpoint_url);
+        print!("Testing LLM endpoint ({}) ... ", core.config.endpoint_url);
         io::stdout().flush()?;
-        match llm.test_connection().await {
+        match core.llm.test_connection().await {
             Ok(_) => println!("connected."),
             Err(e) => {
                 println!("warning: could not reach LLM server ({e}).");
-                println!("         Make sure llama-server is running on {}", config.endpoint_url);
+                println!("         Make sure llama-server is running on {}", core.config.endpoint_url);
             }
         }
 
-        Ok(Self {
-            config,
-            vector_store,
-            sidecar,
-            llm,
-            history: Vec::new(),
-        })
+        Ok(Self { core })
     }
 
     pub async fn run(&mut self) -> Result<()> {
@@ -70,7 +47,7 @@ impl ReplSession {
     }
 
     async fn run_loop(&mut self) -> Result<()> {
-        Self::print_banner(&self.config);
+        Self::print_banner(&self.core.config);
 
         loop {
             print!("\nloomis> ");
@@ -91,9 +68,9 @@ impl ReplSession {
             if trimmed.starts_with('/') {
                 let should_continue = CommandHandler::execute(
                     trimmed,
-                    &self.config,
-                    &self.vector_store,
-                    &mut self.history,
+                    &self.core.config,
+                    &self.core.vector_store,
+                    &mut self.core.history,
                 )
                 .await?;
 
@@ -108,7 +85,7 @@ impl ReplSession {
         }
 
         println!("\nShutting down sidecar...");
-        self.sidecar.shutdown().await;
+        self.core.sidecar.shutdown().await;
         println!("Goodbye!");
         Ok(())
     }
@@ -123,64 +100,34 @@ impl ReplSession {
     }
 
     async fn handle_query(&mut self, query: &str) -> Result<()> {
-        // 1. LLM for intent classification: prompt -> llm for intent classification
-        let intent = match self.llm.classify_code_intent(query).await {
-            Ok(i) => i,
-            Err(_) => fallback_classify_code_intent(query),
-        };
+        // 1. Classify intent and conditionally retrieve chunks
+        let prep = self.core.prepare_query(query).await?;
 
-        // 2. Routing: don't rag if intent not code else rag it
-        // 1. If intent code: rag it
-        // 2. If intent not code: don't rag it
-        let chunks = match intent {
+        match prep.intent {
             CodeIntent::Chat => {
                 println!("[Intent: CHAT -> Non-code query detected (RAG bypassed)]");
-                Vec::new()
             }
             CodeIntent::Code => {
                 println!("[Intent: CODE -> Code query detected (RAG retrieval initiated)]");
-                print!("🔍 Searching repository context... ");
-                io::stdout().flush()?;
+                println!("🔍 Searching repository context... done. (found {} relevant snippets)", prep.chunks.len());
 
-                // Compute embedding with sidecar
-                let query_vector = match self.sidecar.embed(query).await {
-                    Ok(v) => v,
-                    Err(e) => {
-                        println!("\n[ERROR] Embedding failed: {e}");
-                        return Ok(());
-                    }
-                };
-
-                // Query LanceDB for top-K chunks
-                let c = match self.vector_store.search(query_vector, self.config.top_k).await {
-                    Ok(c) => c,
-                    Err(e) => {
-                        println!("\n[ERROR] Vector search failed: {e}");
-                        return Ok(());
-                    }
-                };
-
-                println!("done. (found {} relevant snippets)", c.len());
-
-                if !c.is_empty() {
+                if !prep.chunks.is_empty() {
                     println!("\nRetrieved Context Sources:");
-                    for (idx, item) in c.iter().enumerate() {
+                    for (idx, item) in prep.chunks.iter().enumerate() {
                         let name = if item.extracted_name.is_empty() { "block" } else { &item.extracted_name };
                         println!("  [{}] {} ({}) [dist: {:.2}]", idx + 1, item.path, name, item.distance);
                     }
                 }
-                c
             }
-        };
+        }
 
-        // 3. Send to LLM for regeneration
-        let messages = build_rag_messages(query, &chunks, &self.history, intent);
-
+        // 2. Send to LLM for regeneration
         println!("\n--- Loomis ---");
         let mut formatter = StreamingCodeFormatter::new();
         let stream_result = self
+            .core
             .llm
-            .stream_chat(&messages, |token| {
+            .stream_chat(&prep.messages, |token| {
                 formatter.process_chunk(token)?;
                 Ok(())
             })
@@ -191,22 +138,11 @@ impl ReplSession {
 
         match stream_result {
             Ok(full_response) => {
-                // Update ephemeral conversation history (never saved to disk)
-                // Only push constructive answers; skip refusals from poisoning history
-                if !full_response.trim().starts_with("I can't answer that") {
-                    self.history.push(ChatMessage {
-                        role: "user".to_string(),
-                        content: query.to_string(),
-                    });
-                    self.history.push(ChatMessage {
-                        role: "assistant".to_string(),
-                        content: full_response,
-                    });
-                }
+                self.core.record_turn(query, &full_response);
             }
             Err(e) => {
                 eprintln!("\n[ERROR] LLM generation failed: {e}");
-                eprintln!("        Make sure llama-server is running on {}", self.config.endpoint_url);
+                eprintln!("        Make sure llama-server is running on {}", self.core.config.endpoint_url);
             }
         }
 

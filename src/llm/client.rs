@@ -1,16 +1,15 @@
-﻿use anyhow::{bail, Context, Result};
+﻿use anyhow::{Context, Result};
 use futures_util::StreamExt;
-use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
-use super::prompt::{fallback_classify_code_intent, CodeIntent};
+use super::prompt::CodeIntent;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatMessage {
     pub role: String,
     pub content: String,
 }
 
+#[derive(Clone)]
 pub struct LlmClient {
     endpoint_url: String,
     model: String,
@@ -28,184 +27,245 @@ impl LlmClient {
         }
     }
 
-    fn build_headers(&self) -> Result<HeaderMap> {
-        let mut headers = HeaderMap::new();
-        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        if let Some(ref key) = self.api_key {
-            let auth_val = format!("Bearer {key}");
-            let mut val = HeaderValue::from_str(&auth_val)?;
-            val.set_sensitive(true);
-            headers.insert(AUTHORIZATION, val);
-        }
-        Ok(headers)
-    }
-
-    pub async fn test_connection(&self) -> Result<String> {
-        let headers = self.build_headers()?;
-        let payload = json!({
-            "model": self.model,
-            "messages": [
-                {"role": "user", "content": "Say OK if you can read this."}
-            ],
-            "max_tokens": 10
-        });
-
-        let resp = self
-            .client
-            .post(&self.endpoint_url)
-            .headers(headers)
-            .json(&payload)
-            .send()
-            .await
-            .with_context(|| format!("Failed to connect to LLM server at {}", self.endpoint_url))?;
-
-        let status = resp.status();
-        if !status.is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            bail!("LLM server returned error status {status}: {body}");
-        }
-
-        let body: serde_json::Value = resp.json().await?;
-        let content = body["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or("")
-            .trim()
-            .to_string();
-
-        Ok(content)
-    }
-
+    /// Query intent classifier using local model few-shot evaluation.
+    /// Returns CodeIntent::Code if user is asking for code generation or implementation,
+    /// or CodeIntent::Chat for greetings, general non-code conversation, or conceptual questions.
     pub async fn classify_code_intent(&self, query: &str) -> Result<CodeIntent> {
-        let headers = self.build_headers()?;
-        let system_prompt = "\
-You are an intent classifier for a code assistant. Decide if the user query requires generating or modifying programming code (CODE) or is a conversational message, question, explanation, or general inquiry (CHAT). Output only CODE or CHAT.";
+        let classification_messages = vec![
+            ChatMessage {
+                role: "system".to_string(),
+                content: "You are a strict intent classification engine. Classify the user query into exactly one word: CODE or CHAT.\n- CODE: user requests code implementation, generation, refactoring, or writing code.\n- CHAT: conversational greetings, general non-code questions, conceptual explanations without code request, or asking about chat history.\n\nAnswer with ONLY 'CODE' or 'CHAT'.".to_string(),
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: "User query: hello\nClassification (CODE or CHAT):".to_string(),
+            },
+            ChatMessage {
+                role: "assistant".to_string(),
+                content: "CHAT".to_string(),
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: "User query: give me code about m5 checksum\nClassification (CODE or CHAT):".to_string(),
+            },
+            ChatMessage {
+                role: "assistant".to_string(),
+                content: "CODE".to_string(),
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: "User query: explain how a checksum works\nClassification (CODE or CHAT):".to_string(),
+            },
+            ChatMessage {
+                role: "assistant".to_string(),
+                content: "CHAT".to_string(),
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: "User query: what is the difference between list and tuple\nClassification (CODE or CHAT):".to_string(),
+            },
+            ChatMessage {
+                role: "assistant".to_string(),
+                content: "CHAT".to_string(),
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: "User query: what's my last prompt to you?\nClassification (CODE or CHAT):".to_string(),
+            },
+            ChatMessage {
+                role: "assistant".to_string(),
+                content: "CHAT".to_string(),
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: "User query: now make it faster\nClassification (CODE or CHAT):".to_string(),
+            },
+            ChatMessage {
+                role: "assistant".to_string(),
+                content: "CODE".to_string(),
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: format!("User query: {query}\nClassification (CODE or CHAT):"),
+            },
+        ];
 
-        let user_prompt = format!("User query: {}\nClassification (CODE or CHAT):", query);
-
-        let messages = json!([
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": "User query: hello there\nClassification (CODE or CHAT):"},
-            {"role": "assistant", "content": "CHAT"},
-            {"role": "user", "content": "User query: write a function to calculate factorial\nClassification (CODE or CHAT):"},
-            {"role": "assistant", "content": "CODE"},
-            {"role": "user", "content": "User query: can you explain what is recursion?\nClassification (CODE or CHAT):"},
-            {"role": "assistant", "content": "CHAT"},
-            {"role": "user", "content": "User query: give me code to read a json file\nClassification (CODE or CHAT):"},
-            {"role": "assistant", "content": "CODE"},
-            {"role": "user", "content": "User query: what is the capital of Japan?\nClassification (CODE or CHAT):"},
-            {"role": "assistant", "content": "CHAT"},
-            {"role": "user", "content": "User query: what did I ask before?\nClassification (CODE or CHAT):"},
-            {"role": "assistant", "content": "CHAT"},
-            {"role": "user", "content": "User query: optimize this loop to be faster\nClassification (CODE or CHAT):"},
-            {"role": "assistant", "content": "CODE"},
-            {"role": "user", "content": user_prompt}
-        ]);
-
-        let payload = json!({
-            "model": self.model,
-            "messages": messages,
-            "stream": false,
-            "temperature": 0.0,
-            "max_tokens": 4
-        });
-
-        let resp = self
-            .client
-            .post(&self.endpoint_url)
-            .headers(headers)
-            .json(&payload)
-            .send()
-            .await;
-
-        let resp = match resp {
-            Ok(r) => r,
-            Err(_) => return Ok(fallback_classify_code_intent(query)),
+        let req_body = ChatCompletionRequest {
+            model: self.model.clone(),
+            messages: classification_messages,
+            stream: false,
+            temperature: 0.0,
+            max_tokens: 4,
         };
 
-        if !resp.status().is_success() {
-            return Ok(fallback_classify_code_intent(query));
+        let mut req = self.client.post(&self.endpoint_url).json(&req_body);
+        if let Some(ref key) = self.api_key {
+            req = req.bearer_auth(key);
         }
 
-        let body: serde_json::Value = match resp.json().await {
-            Ok(b) => b,
-            Err(_) => return Ok(fallback_classify_code_intent(query)),
-        };
+        let resp = req.send().await.context("Failed to send classification request")?;
+        if !resp.status().is_success() {
+            return Ok(CodeIntent::Chat);
+        }
 
-        let raw = body["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or("")
-            .trim()
-            .to_uppercase();
+        let body: ChatCompletionResponse = resp.json().await.context("Failed to parse classification response")?;
+        let answer = body
+            .choices
+            .first()
+            .and_then(|c| c.message.as_ref())
+            .map(|m| m.content.trim().to_uppercase())
+            .unwrap_or_default();
 
-        if raw.contains("CODE") {
+        if answer.contains("CODE") {
             Ok(CodeIntent::Code)
         } else {
             Ok(CodeIntent::Chat)
         }
     }
 
-    pub async fn stream_chat<F>(&self, messages: &[ChatMessage], mut on_token: F) -> Result<String>
-    where
-        F: FnMut(&str) -> Result<()>,
-    {
-        let headers = self.build_headers()?;
-        let payload = json!({
-            "model": self.model,
-            "messages": messages,
-            "stream": true,
-            "temperature": 0.2,
-            "max_tokens": 1536
-        });
+    /// Pre-flight connectivity check to verify LLM server is up and reachable.
+    pub async fn test_connection(&self) -> Result<()> {
+        let test_messages = vec![ChatMessage {
+            role: "user".to_string(),
+            content: "ping".to_string(),
+        }];
 
-        let resp = self
-            .client
-            .post(&self.endpoint_url)
-            .headers(headers)
-            .json(&payload)
+        let req_body = ChatCompletionRequest {
+            model: self.model.clone(),
+            messages: test_messages,
+            stream: false,
+            temperature: 0.1,
+            max_tokens: 5,
+        };
+
+        let mut req = self.client.post(&self.endpoint_url).json(&req_body);
+        if let Some(ref key) = self.api_key {
+            req = req.bearer_auth(key);
+        }
+
+        let resp = req
             .send()
             .await
-            .with_context(|| format!("Failed to send request to LLM server at {}", self.endpoint_url))?;
+            .context("Cannot reach LLM server. Is llama-server running?")?;
 
-        let status = resp.status();
-        if !status.is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            bail!("LLM server returned status {status}: {body}");
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            anyhow::bail!("LLM server returned HTTP {status}: {text}");
+        }
+
+        Ok(())
+    }
+
+    /// Stream chat response from OpenAI-compatible endpoint using Server-Sent Events (SSE).
+    /// Calls `on_token` callback synchronously for each streamed token piece.
+    /// Returns the complete accumulated response text.
+    pub async fn stream_chat<F>(&self, messages: &[ChatMessage], mut on_token: F) -> Result<String>
+    where
+        F: FnMut(&str) -> Result<(), std::io::Error>,
+    {
+        let req_body = ChatCompletionRequest {
+            model: self.model.clone(),
+            messages: messages.to_vec(),
+            stream: true,
+            temperature: 0.2,
+            max_tokens: 1536,
+        };
+
+        let mut req = self.client.post(&self.endpoint_url).json(&req_body);
+        if let Some(ref key) = self.api_key {
+            req = req.bearer_auth(key);
+        }
+
+        let resp = req
+            .send()
+            .await
+            .context("Failed to connect to LLM server for streaming")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            anyhow::bail!("LLM streaming request failed with HTTP {status}: {text}");
         }
 
         let mut stream = resp.bytes_stream();
-        let mut buffer = String::new();
         let mut full_response = String::new();
+        let mut line_buffer = String::new();
 
         while let Some(chunk_result) = stream.next().await {
-            let chunk = chunk_result.context("Error while streaming bytes from LLM")?;
-            buffer.push_str(&String::from_utf8_lossy(&chunk));
+            let chunk = chunk_result.context("Error reading SSE stream chunk")?;
+            let chunk_str = String::from_utf8_lossy(&chunk);
+            line_buffer.push_str(&chunk_str);
 
-            while let Some(newline_pos) = buffer.find('\n') {
-                let line = buffer[..newline_pos].trim().to_string();
-                buffer.drain(..=newline_pos);
+            while let Some(pos) = line_buffer.find('\n') {
+                let line: String = line_buffer.drain(..=pos).collect();
+                let trimmed = line.trim();
 
-                if line.is_empty() {
-                    continue;
-                }
-                let Some(data) = line.strip_prefix("data: ") else {
-                    continue;
-                };
-                if data == "[DONE]" {
-                    break;
+                if trimmed.is_empty() || trimmed.starts_with(':') {
+                    continue; // Skip keep-alive / SSE comments
                 }
 
-                let parsed: serde_json::Value = match serde_json::from_str(data) {
-                    Ok(v) => v,
-                    Err(_) => continue,
-                };
+                if let Some(data_str) = trimmed.strip_prefix("data:") {
+                    let data = data_str.trim();
 
-                if let Some(token) = parsed["choices"][0]["delta"]["content"].as_str() {
-                    on_token(token)?;
-                    full_response.push_str(token);
+                    if data == "[DONE]" {
+                        break;
+                    }
+
+                    if let Ok(stream_chunk) = serde_json::from_str::<ChatCompletionChunk>(data) {
+                        for choice in stream_chunk.choices {
+                            if let Some(content) = choice.delta.content {
+                                if !content.is_empty() {
+                                    on_token(&content)?;
+                                    full_response.push_str(&content);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
 
         Ok(full_response)
     }
+}
+
+// Request and response DTOs matching OpenAI Chat Completion schema
+#[derive(Serialize)]
+struct ChatCompletionRequest {
+    model: String,
+    messages: Vec<ChatMessage>,
+    stream: bool,
+    temperature: f32,
+    max_tokens: u32,
+}
+
+#[derive(Deserialize)]
+struct ChatCompletionResponse {
+    choices: Vec<ChoiceResponse>,
+}
+
+#[derive(Deserialize)]
+struct ChoiceResponse {
+    message: Option<ChoiceMessage>,
+}
+
+#[derive(Deserialize)]
+struct ChoiceMessage {
+    content: String,
+}
+
+#[derive(Deserialize)]
+struct ChatCompletionChunk {
+    choices: Vec<StreamChoice>,
+}
+
+#[derive(Deserialize)]
+struct StreamChoice {
+    delta: DeltaContent,
+}
+
+#[derive(Deserialize)]
+struct DeltaContent {
+    content: Option<String>,
 }

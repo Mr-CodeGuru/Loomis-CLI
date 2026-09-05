@@ -13,12 +13,14 @@ examples/
   testParquet.rs
   testRetrievalPipeline.rs
   testSidecarIpc.rs
+  testTuiMarkdown.rs
 loadModels/
   loadJina.py
   loadLlamaQ8.py
 models/
 prompts/
   claude.md
+  claudeLoomisTUI.md
   createdYet-2026-09-04-18-32.md
   createdYet-2026-09-05-16-47.md
 QTest/
@@ -47,7 +49,12 @@ src/
     client.rs
     mod.rs
     process.rs
+  tui/
+    app.rs
+    markdown.rs
+    mod.rs
   config.rs
+  core.rs
   lib.rs
   main.rs
 .gitattributes
