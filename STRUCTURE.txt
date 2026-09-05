@@ -23,6 +23,7 @@ prompts/
   claudeLoomisTUI.md
   createdYet-2026-09-04-18-32.md
   createdYet-2026-09-05-16-47.md
+  createdYet-2026-09-05-18-05.md
 QTest/
   TQ1v1.0.2.md
 scripts/
