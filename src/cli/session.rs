@@ -122,63 +122,59 @@ impl ReplSession {
     }
 
     async fn handle_query(&mut self, query: &str) -> Result<()> {
-        // 1. Binary intent classification via fast LLM pass
+        // 1. LLM for intent classification: prompt -> llm for intent classification
         let intent = match self.llm.classify_code_intent(query).await {
             Ok(i) => i,
             Err(_) => fallback_classify_code_intent(query),
         };
 
-        // 2. Visible logging of classification decision
-        match intent {
+        // 2. Routing: don't rag if intent not code else rag it
+        // 1. If intent code: rag it
+        // 2. If intent not code: don't rag it
+        let chunks = match intent {
             CodeIntent::Chat => {
-                println!("[Intent: CHAT -> Direct response (Search bypassed)]");
+                println!("[Intent: CHAT -> Non-code query detected (RAG bypassed)]");
+                Vec::new()
             }
             CodeIntent::Code => {
-                println!("[Intent: CODE -> Code request detected (Running repository search)]");
+                println!("[Intent: CODE -> Code query detected (RAG retrieval initiated)]");
+                print!("🔍 Searching repository context... ");
+                io::stdout().flush()?;
+
+                // Compute embedding with sidecar
+                let query_vector = match self.sidecar.embed(query).await {
+                    Ok(v) => v,
+                    Err(e) => {
+                        println!("\n[ERROR] Embedding failed: {e}");
+                        return Ok(());
+                    }
+                };
+
+                // Query LanceDB for top-K chunks
+                let c = match self.vector_store.search(query_vector, self.config.top_k).await {
+                    Ok(c) => c,
+                    Err(e) => {
+                        println!("\n[ERROR] Vector search failed: {e}");
+                        return Ok(());
+                    }
+                };
+
+                println!("done. (found {} relevant snippets)", c.len());
+
+                if !c.is_empty() {
+                    println!("\nRetrieved Context Sources:");
+                    for (idx, item) in c.iter().enumerate() {
+                        let name = if item.extracted_name.is_empty() { "block" } else { &item.extracted_name };
+                        println!("  [{}] {} ({}) [dist: {:.2}]", idx + 1, item.path, name, item.distance);
+                    }
+                }
+                c
             }
-        }
-
-        // 3. Conditional retrieval: only CODE intent triggers LanceDB search
-        let chunks = if intent == CodeIntent::Chat {
-            Vec::new()
-        } else {
-            print!("🔍 Searching repository context... ");
-            io::stdout().flush()?;
-
-            // Compute embedding with sidecar
-            let query_vector = match self.sidecar.embed(query).await {
-                Ok(v) => v,
-                Err(e) => {
-                    println!("\n[ERROR] Embedding failed: {e}");
-                    return Ok(());
-                }
-            };
-
-            // Query LanceDB for top-K chunks
-            let c = match self.vector_store.search(query_vector, self.config.top_k).await {
-                Ok(c) => c,
-                Err(e) => {
-                    println!("\n[ERROR] Vector search failed: {e}");
-                    return Ok(());
-                }
-            };
-
-            println!("done. (found {} relevant snippets)", c.len());
-
-            if !c.is_empty() {
-                println!("\nRetrieved Context Sources:");
-                for (idx, item) in c.iter().enumerate() {
-                    let name = if item.extracted_name.is_empty() { "block" } else { &item.extracted_name };
-                    println!("  [{}] {} ({}) [dist: {:.2}]", idx + 1, item.path, name, item.distance);
-                }
-            }
-            c
         };
 
-        // 4. Build RAG prompt
+        // 3. Send to LLM for regeneration
         let messages = build_rag_messages(query, &chunks, &self.history, intent);
 
-        // 5. Stream response from LLM
         println!("\n--- Loomis ---");
         let stream_result = self
             .llm

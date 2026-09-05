@@ -7,42 +7,10 @@ pub enum CodeIntent {
     Chat,
 }
 
-/// Strict, high-precision detection for explicit code requests.
-/// Returns true if the query contains unambiguous code-seeking signals.
-pub fn is_explicit_code_request(query: &str) -> bool {
-    let lower = query.trim().to_lowercase();
-
-    let code_patterns = [
-        // Direct code phrases
-        "give me code", "give me a code", "show me code", "write code", "need code",
-        "code about", "code for", "code to", "code that", "code snippet",
-        "sample code", "example code",
-        // Direct verbs & imperatives
-        "write a ", "write an ", "write python", "write rust", "write bash",
-        "write javascript", "write c ", "write c++", "write go ",
-        "implement ", "implementing ", "refactor", "extend the ", "generate a ",
-        "generate code", "create a function", "create a class", "create a script",
-        "create a module", "build a function", "build a class", "build a script",
-        // Code-seeking questions
-        "how would you write", "how would you code", "how would you implement",
-        "can you write", "can you implement", "can you code",
-        "give me a function", "show me a function", "show me an example of code",
-        // Specific coding terms & syntax
-        "def ", "class ", "fn ", "struct ", "enum ",
-        "function to ", "function that ", "script to ", "script that ",
-        "method to ", "method that ", "algorithm for ", "algorithm to ",
-        "checksum", "hash of", "sha256", "md5", "context manager",
-    ];
-
-    code_patterns.iter().any(|&pat| lower.contains(pat))
-}
-
-pub fn fallback_classify_code_intent(query: &str) -> CodeIntent {
-    if is_explicit_code_request(query) {
-        CodeIntent::Code
-    } else {
-        CodeIntent::Chat
-    }
+/// Fallback classifier used only when LLM server is unreachable.
+/// Defaults conservatively to Chat to avoid generating unprompted code.
+pub fn fallback_classify_code_intent(_query: &str) -> CodeIntent {
+    CodeIntent::Chat
 }
 
 pub fn build_rag_messages(

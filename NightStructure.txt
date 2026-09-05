@@ -21,6 +21,7 @@ Nightly/
   correction-Nightly-v1.0.1.md
   correction-Nightly-v1.0.2.md
   correction-Nightly-v1.0.3.md
+  correction-Nightly-v1.1.2.md
   correction-Nightly-v1.1.4.md
   NightStructure.txt
 prompts/

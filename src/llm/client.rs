@@ -76,26 +76,29 @@ impl LlmClient {
     }
 
     pub async fn classify_code_intent(&self, query: &str) -> Result<CodeIntent> {
-        // Fast-path: Check unambiguous code signals first (0ms latency, eliminates small model blindspots)
-        if super::prompt::is_explicit_code_request(query) {
-            return Ok(CodeIntent::Code);
-        }
-
         let headers = self.build_headers()?;
         let system_prompt = "\
-You are a classification tool. Your only job is to categorize user queries as either CODE (if the user asks for code to be written, generated, implemented, refactored, or demonstrated, including questions like 'how would you write...', 'can you implement...') or CHAT (if the user is greeting, chatting, asking general non-code questions, or asking what you can do). Do not write code. Reply with ONLY the single word 'CODE' or 'CHAT'.";
+You are an intent classifier for a code assistant. Decide if the user query requires generating or modifying programming code (CODE) or is a conversational message, question, explanation, or general inquiry (CHAT). Output only CODE or CHAT.";
+
+        let user_prompt = format!("User query: {}\nClassification (CODE or CHAT):", query);
 
         let messages = json!([
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": "hello there, first time here"},
+            {"role": "user", "content": "User query: hello there\nClassification (CODE or CHAT):"},
             {"role": "assistant", "content": "CHAT"},
-            {"role": "user", "content": "Write a python function to parse csv files"},
+            {"role": "user", "content": "User query: write a function to calculate factorial\nClassification (CODE or CHAT):"},
             {"role": "assistant", "content": "CODE"},
-            {"role": "user", "content": "who created you and what can you do?"},
+            {"role": "user", "content": "User query: can you explain what is recursion?\nClassification (CODE or CHAT):"},
             {"role": "assistant", "content": "CHAT"},
-            {"role": "user", "content": "how would you implement a binary search?"},
+            {"role": "user", "content": "User query: give me code to read a json file\nClassification (CODE or CHAT):"},
             {"role": "assistant", "content": "CODE"},
-            {"role": "user", "content": query}
+            {"role": "user", "content": "User query: what is the capital of Japan?\nClassification (CODE or CHAT):"},
+            {"role": "assistant", "content": "CHAT"},
+            {"role": "user", "content": "User query: what did I ask before?\nClassification (CODE or CHAT):"},
+            {"role": "assistant", "content": "CHAT"},
+            {"role": "user", "content": "User query: optimize this loop to be faster\nClassification (CODE or CHAT):"},
+            {"role": "assistant", "content": "CODE"},
+            {"role": "user", "content": user_prompt}
         ]);
 
         let payload = json!({
@@ -134,7 +137,7 @@ You are a classification tool. Your only job is to categorize user queries as ei
             .trim()
             .to_uppercase();
 
-        if raw.contains("CODE") || raw.starts_with("```") || raw.contains("YES") {
+        if raw.contains("CODE") {
             Ok(CodeIntent::Code)
         } else {
             Ok(CodeIntent::Chat)

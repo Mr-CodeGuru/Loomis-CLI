@@ -5,7 +5,7 @@ use loomiscli::sidecar::SidecarClient;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    println!("=== LoomisCLI v1.1.4 Verification Suite ===\n");
+    println!("=== LoomisCLI v1.1.2 Verification Suite ===\n");
 
     let llm = LlmClient::new(
         "http://localhost:8080/v1/chat/completions".to_string(),
@@ -13,9 +13,9 @@ async fn main() -> Result<()> {
         None,
     );
 
-    println!("--- Part 1: Intent Classification Phrasing Matrix ---");
+    println!("--- Part 1: Pure LLM Intent Classification (Zero Word-Matching) ---");
     let test_queries = [
-        ("give me code about m5 checksum", CodeIntent::Code, "Regression from v1.1.4"),
+        ("give me code about m5 checksum", CodeIntent::Code, "Direct code request with algorithm name"),
         ("give me code for md5 checksum", CodeIntent::Code, "Direct code request variant"),
         ("show me code to read a file", CodeIntent::Code, "Direct code request variant"),
         ("need code for quicksort", CodeIntent::Code, "Code request variant"),
@@ -30,6 +30,8 @@ async fn main() -> Result<()> {
         ("what can you do", CodeIntent::Chat, "Capabilities inquiry"),
         ("sooo, how are you?", CodeIntent::Chat, "Small-talk inquiry"),
         ("what's my last prompt to you?", CodeIntent::Chat, "Meta-conversation inquiry"),
+        ("explain how a checksum works", CodeIntent::Chat, "Explanation inquiry with coding term (Must NOT trigger code generation)"),
+        ("what is the difference between list and tuple", CodeIntent::Chat, "Conceptual question without code request"),
         ("what is the capital of France", CodeIntent::Chat, "Non-code general knowledge"),
     ];
 
@@ -49,13 +51,14 @@ async fn main() -> Result<()> {
     println!("\nClassification Accuracy: {}/{}\n", passed, test_queries.len());
     assert_eq!(passed, test_queries.len(), "All classification tests must pass!");
 
-    println!("--- Part 2: Multi-Turn Conversation History Retention ---");
+    println!("--- Part 2: Multi-Turn Conversation Flow (Intent -> Conditional RAG -> Regeneration) ---");
     let mut history: Vec<ChatMessage> = Vec::new();
 
-    // Turn 1: Greeting
+    // Turn 1: Small talk
     let q1 = "sooo, how are you?";
     let intent1 = llm.classify_code_intent(q1).await?;
-    println!("Turn 1: User says: '{}' [Intent: {:?}]", q1, intent1);
+    println!("Turn 1: User says: '{}' [LLM Intent: {:?}]", q1, intent1);
+    assert_eq!(intent1, CodeIntent::Chat);
     let msgs1 = build_rag_messages(q1, &[], &history, intent1);
     let r1 = llm.stream_chat(&msgs1, |_| Ok(())).await?;
     println!("Loomis Turn 1 response: {}\n", r1.trim());
@@ -65,7 +68,8 @@ async fn main() -> Result<()> {
     // Turn 2: Meta-prompt check: "what's my last prompt to you?"
     let q2 = "what's my last prompt to you?";
     let intent2 = llm.classify_code_intent(q2).await?;
-    println!("Turn 2: User says: '{}' [Intent: {:?}]", q2, intent2);
+    println!("Turn 2: User says: '{}' [LLM Intent: {:?}]", q2, intent2);
+    assert_eq!(intent2, CodeIntent::Chat);
     let msgs2 = build_rag_messages(q2, &[], &history, intent2);
     let r2 = llm.stream_chat(&msgs2, |_| Ok(())).await?;
     println!("Loomis Turn 2 response: {}\n", r2.trim());
@@ -76,39 +80,40 @@ async fn main() -> Result<()> {
     history.push(ChatMessage { role: "user".to_string(), content: q2.to_string() });
     history.push(ChatMessage { role: "assistant".to_string(), content: r2 });
 
-    // Turn 3: Unambiguous Code Request: "give me code about m5 checksum"
-    let q3 = "give me code about m5 checksum";
+    // Turn 3: Explanation check: "explain how a checksum works" (Must NOT trigger code generation or RAG)
+    let q3 = "explain how a checksum works";
     let intent3 = llm.classify_code_intent(q3).await?;
-    println!("Turn 3: User says: '{}' [Intent: {:?}]", q3, intent3);
-    assert_eq!(intent3, CodeIntent::Code, "Turn 3 must be classified as CODE!");
+    println!("Turn 3: User says: '{}' [LLM Intent: {:?}]", q3, intent3);
+    assert_eq!(intent3, CodeIntent::Chat, "Explanation request must be CHAT intent (no RAG)!");
+    let msgs3 = build_rag_messages(q3, &[], &history, intent3);
+    let r3 = llm.stream_chat(&msgs3, |_| Ok(())).await?;
+    println!("Loomis Turn 3 response (Explanation without unprompted code):\n{}\n", r3.trim());
+    history.push(ChatMessage { role: "user".to_string(), content: q3.to_string() });
+    history.push(ChatMessage { role: "assistant".to_string(), content: r3 });
+
+    // Turn 4: Explicit Code Request: "give me code about m5 checksum" -> Triggers RAG
+    let q4 = "give me code about m5 checksum";
+    let intent4 = llm.classify_code_intent(q4).await?;
+    println!("Turn 4: User says: '{}' [LLM Intent: {:?}]", q4, intent4);
+    assert_eq!(intent4, CodeIntent::Code, "Turn 4 must be classified as CODE (RAG triggered)!");
 
     // Connect sidecar and store for RAG
     let mut sidecar = SidecarClient::new().await?;
     let store = VectorStore::connect_or_create().await?;
 
-    let emb = sidecar.embed(q3).await?;
-    let chunks = store.search(emb, 5).await?;
-    println!("Retrieved {} chunks for '{}'", chunks.len(), q3);
-    for (i, c) in chunks.iter().enumerate() {
+    let emb4 = sidecar.embed(q4).await?;
+    let chunks4 = store.search(emb4, 5).await?;
+    println!("Retrieved {} chunks for '{}'", chunks4.len(), q4);
+    for (i, c) in chunks4.iter().enumerate() {
         println!("  [{}] {} (dist: {:.2})", i + 1, c.path, c.distance);
     }
 
-    let msgs3 = build_rag_messages(q3, &chunks, &history, intent3);
-    let r3 = llm.stream_chat(&msgs3, |_| Ok(())).await?;
-    println!("Loomis Turn 3 response:\n{}\n", r3.trim());
-
-    // Turn 4: Follow-up code request: "now make it faster"
-    let q4 = "now make it faster";
-    let intent4 = llm.classify_code_intent(q4).await?;
-    println!("Turn 4: User says: '{}' [Intent: {:?}]", q4, intent4);
-    assert_eq!(intent4, CodeIntent::Code, "Turn 4 must be classified as CODE!");
-
-    let emb4 = sidecar.embed(q4).await?;
-    let chunks4 = store.search(emb4, 5).await?;
     let msgs4 = build_rag_messages(q4, &chunks4, &history, intent4);
     let r4 = llm.stream_chat(&msgs4, |_| Ok(())).await?;
-    println!("Loomis Turn 4 response:\n{}\n", r4.trim());
+    println!("Loomis Turn 4 response (RAG grounded code):\n{}\n", r4.trim());
+    history.push(ChatMessage { role: "user".to_string(), content: q4.to_string() });
+    history.push(ChatMessage { role: "assistant".to_string(), content: r4 });
 
-    println!("=== All v1.1.4 Checks Succeeded ===");
+    println!("=== All v1.1.2 Checks Succeeded ===");
     Ok(())
 }
