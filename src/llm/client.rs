@@ -3,6 +3,7 @@ use futures_util::StreamExt;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use super::prompt::{fallback_classify_code_intent, CodeIntent};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
@@ -72,6 +73,67 @@ impl LlmClient {
             .to_string();
 
         Ok(content)
+    }
+
+    pub async fn classify_code_intent(&self, query: &str) -> Result<CodeIntent> {
+        let headers = self.build_headers()?;
+        let system_prompt = "\
+You are a classification tool. Your only job is to categorize user queries as either CODE (if the user asks for code to be written, generated, implemented, refactored, or demonstrated, including questions like 'how would you write...', 'can you implement...') or CHAT (if the user is greeting, chatting, asking general non-code questions, or asking what you can do). Do not write code. Reply with ONLY the single word 'CODE' or 'CHAT'.";
+
+        let messages = json!([
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": "hello there, first time here"},
+            {"role": "assistant", "content": "CHAT"},
+            {"role": "user", "content": "Write a python function to parse csv files"},
+            {"role": "assistant", "content": "CODE"},
+            {"role": "user", "content": "who created you and what can you do?"},
+            {"role": "assistant", "content": "CHAT"},
+            {"role": "user", "content": "how would you implement a binary search?"},
+            {"role": "assistant", "content": "CODE"},
+            {"role": "user", "content": query}
+        ]);
+
+        let payload = json!({
+            "model": self.model,
+            "messages": messages,
+            "stream": false,
+            "temperature": 0.0,
+            "max_tokens": 4
+        });
+
+        let resp = self
+            .client
+            .post(&self.endpoint_url)
+            .headers(headers)
+            .json(&payload)
+            .send()
+            .await;
+
+        let resp = match resp {
+            Ok(r) => r,
+            Err(_) => return Ok(fallback_classify_code_intent(query)),
+        };
+
+        if !resp.status().is_success() {
+            return Ok(fallback_classify_code_intent(query));
+        }
+
+        let body: serde_json::Value = match resp.json().await {
+            Ok(b) => b,
+            Err(_) => return Ok(fallback_classify_code_intent(query)),
+        };
+
+        let raw = body["choices"][0]["message"]["content"]
+            .as_str()
+            .unwrap_or("")
+            .trim()
+            .to_uppercase();
+
+        if raw.contains("CODE") || raw.starts_with("```") || raw.contains("YES") {
+            Ok(CodeIntent::Code)
+        } else {
+            Ok(CodeIntent::Chat)
+        }
     }
 
     pub async fn stream_chat<F>(&self, messages: &[ChatMessage], mut on_token: F) -> Result<String>

@@ -2,7 +2,7 @@
 use std::io::{self, Write};
 use crate::config::AppConfig;
 use crate::db::VectorStore;
-use crate::llm::{build_rag_messages, classify_query_intent, ChatMessage, LlmClient, QueryIntent};
+use crate::llm::{build_rag_messages, fallback_classify_code_intent, ChatMessage, CodeIntent, LlmClient};
 use crate::sidecar::SidecarClient;
 use super::commands::CommandHandler;
 
@@ -122,15 +122,30 @@ impl ReplSession {
     }
 
     async fn handle_query(&mut self, query: &str) -> Result<()> {
-        let intent = classify_query_intent(query);
+        // 1. Binary intent classification via fast LLM pass
+        let intent = match self.llm.classify_code_intent(query).await {
+            Ok(i) => i,
+            Err(_) => fallback_classify_code_intent(query),
+        };
 
-        let chunks = if intent == QueryIntent::Greeting {
+        // 2. Visible logging of classification decision
+        match intent {
+            CodeIntent::Chat => {
+                println!("[Intent: CHAT -> Direct response (Search bypassed)]");
+            }
+            CodeIntent::Code => {
+                println!("[Intent: CODE -> Code request detected (Running repository search)]");
+            }
+        }
+
+        // 3. Conditional retrieval: only CODE intent triggers LanceDB search
+        let chunks = if intent == CodeIntent::Chat {
             Vec::new()
         } else {
             print!("🔍 Searching repository context... ");
             io::stdout().flush()?;
 
-            // 1. Compute embedding with sidecar
+            // Compute embedding with sidecar
             let query_vector = match self.sidecar.embed(query).await {
                 Ok(v) => v,
                 Err(e) => {
@@ -139,7 +154,7 @@ impl ReplSession {
                 }
             };
 
-            // 2. Query LanceDB for top-K chunks
+            // Query LanceDB for top-K chunks
             let c = match self.vector_store.search(query_vector, self.config.top_k).await {
                 Ok(c) => c,
                 Err(e) => {
@@ -160,10 +175,10 @@ impl ReplSession {
             c
         };
 
-        // 3. Build RAG prompt
-        let messages = build_rag_messages(query, &chunks, &self.history);
+        // 4. Build RAG prompt
+        let messages = build_rag_messages(query, &chunks, &self.history, intent);
 
-        // 4. Stream response from LLM
+        // 5. Stream response from LLM
         println!("\n--- Loomis ---");
         let stream_result = self
             .llm

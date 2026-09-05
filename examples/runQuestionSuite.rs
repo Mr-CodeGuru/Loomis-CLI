@@ -1,17 +1,17 @@
 use loomiscli::db::VectorStore;
-use loomiscli::llm::{build_rag_messages, classify_query_intent, LlmClient, QueryIntent};
+use loomiscli::llm::{build_rag_messages, fallback_classify_code_intent, CodeIntent, LlmClient};
 use loomiscli::sidecar::SidecarClient;
 
 struct TestCase {
     id: &'static str,
-    part: &'static str,
+    category: &'static str,
     query: &'static str,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     println!("============================================================");
-    println!("   LoomisCLI Test Question Suite (TQ1v1.0.2) Runner");
+    println!("   LoomisCLI Test Question Suite (v1.0.3 Allow-list Intent)");
     println!("============================================================\n");
 
     let store = VectorStore::connect_or_create().await?;
@@ -23,81 +23,94 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let test_cases = vec![
-        // Greetings
+        // Varied phrasing greetings & casual chat (Must bypass retrieval & generate NO code)
         TestCase {
             id: "G1",
-            part: "Greeting",
+            category: "Greeting / Literal",
             query: "hello",
         },
         TestCase {
-            id: "G2",
-            part: "Greeting",
-            query: "hi, who are you and what can you do?",
-        },
-        // Part A
-        TestCase {
-            id: "A1",
-            part: "Part A (Retrieval)",
-            query: "function that stops a running loop",
+            id: "G2-REG",
+            category: "Greeting / Natural Phrasing (v1.0.2 Regression Case)",
+            query: "first time here, so hello",
         },
         TestCase {
-            id: "A2",
-            part: "Part A (Retrieval)",
-            query: "def stop",
+            id: "G3",
+            category: "Greeting / Capabilities Inquiry",
+            query: "who are you and what can you do?",
         },
         TestCase {
-            id: "A3",
-            part: "Part A (Retrieval)",
-            query: "how to handle a KeyError when accessing a dictionary",
+            id: "G4",
+            category: "Greeting / Conversational",
+            query: "good evening, how are you today?",
         },
         TestCase {
-            id: "A4",
-            part: "Part A (Retrieval)",
-            query: "turtle graphics animation",
+            id: "G5",
+            category: "General Non-Code Question",
+            query: "what is the capital of France",
+        },
+
+        // Question-form code requests (Must classify as CODE & trigger retrieval)
+        TestCase {
+            id: "Q1",
+            category: "Question-form Code Request",
+            query: "how would you write a function that calculates the sha256 hash of a file",
         },
         TestCase {
-            id: "A5",
-            part: "Part A (Retrieval)",
-            query: "recursive function with memoization",
+            id: "Q2",
+            category: "Question-form Code Request",
+            query: "can you implement a context manager that logs execution time",
         },
-        // Part B
+
+        // Part B: Code generation suite (Must classify as CODE & trigger retrieval)
         TestCase {
             id: "B1",
-            part: "Part B (Generation)",
+            category: "Part B (Imperative Code Generation)",
             query: "Write a Python function that recursively walks a directory tree and returns all .py files, following the conventions used elsewhere in this codebase for path handling.",
         },
         TestCase {
             id: "B2",
-            part: "Part B (Generation)",
+            category: "Part B (Imperative Code Extension)",
             query: "Extend the stop() function pattern from turtledemo into a full pause/resume state machine for an animation loop.",
         },
         TestCase {
             id: "B3",
-            part: "Part B (Generation)",
+            category: "Part B (Imperative Code Generation)",
             query: "Implement a custom context manager that logs entry/exit timing, following whatever context-manager patterns already exist in this codebase.",
         },
         TestCase {
             id: "B4",
-            part: "Part B (Generation)",
+            category: "Part B (Imperative Code Generation)",
             query: "Given the error-handling style used in this codebase, write a function that safely parses a config file and raises a custom exception with a helpful message on failure.",
         },
         TestCase {
             id: "B5",
-            part: "Part B (Generation)",
+            category: "Part B (Imperative Code Refactoring)",
             query: "Refactor a hypothetical function that uses nested loops for a Cartesian product into something more idiomatic, based on patterns you can find in this codebase (e.g. itertools usage).",
         },
     ];
 
     for tc in test_cases {
         println!("\n------------------------------------------------------------");
-        println!("Test ID: {} | {}", tc.id, tc.part);
+        println!("Test ID: {} | {}", tc.id, tc.category);
         println!("Query: \"{}\"", tc.query);
 
-        let intent = classify_query_intent(tc.query);
-        println!("Intent Detected: {:?}", intent);
+        // Classify intent via fast LLM pass with fallback
+        let intent = match llm.classify_code_intent(tc.query).await {
+            Ok(i) => i,
+            Err(_) => fallback_classify_code_intent(tc.query),
+        };
 
-        let chunks = if intent == QueryIntent::Greeting {
-            println!("(Greeting detected -> skipping LanceDB vector search)");
+        match intent {
+            CodeIntent::Chat => {
+                println!("[Intent Decision: CHAT -> Direct response (Search bypassed)]");
+            }
+            CodeIntent::Code => {
+                println!("[Intent Decision: CODE -> Code request detected (Running repository search)]");
+            }
+        }
+
+        let chunks = if intent == CodeIntent::Chat {
             Vec::new()
         } else {
             let vec = sidecar.embed(tc.query).await?;
@@ -115,7 +128,7 @@ async fn main() -> anyhow::Result<()> {
             res
         };
 
-        let messages = build_rag_messages(tc.query, &chunks, &[]);
+        let messages = build_rag_messages(tc.query, &chunks, &[], intent);
 
         print!("\nLLM Output: ");
         let response = llm.stream_chat(&messages, |t| {
@@ -130,6 +143,6 @@ async fn main() -> anyhow::Result<()> {
     sidecar.shutdown().await;
     println!("\n============================================================");
     println!("   All test cases finished!");
-    println!("============================================================");
+    println!("============================================================\n");
     Ok(())
 }
