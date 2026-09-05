@@ -15,11 +15,7 @@ async fn main() -> anyhow::Result<()> {
     println!("=== LanceDB Parquet Conversion & Search Example ===\n");
 
     let root = std::env::current_dir()?;
-    let base_dir = if root.join("dbe").exists() {
-        root.join("dbe")
-    } else {
-        root.join("db")
-    };
+    let base_dir = root.join("dbe");
     let parquet_path: PathBuf = base_dir.join("embeddings.parquet");
     let db_path: PathBuf = base_dir.join("lancedb");
 
@@ -38,22 +34,20 @@ async fn main() -> anyhow::Result<()> {
     println!("   Loaded {} batches, total rows: {}", batches.len(), total_rows);
 
     let sample_vector: Vec<f32> = {
-        use arrow::array::{Array, FixedSizeListArray, Float32Array};
         let first_batch = &batches[0];
         let vec_col = first_batch
             .column_by_name("vector")
             .expect("vector column missing");
-        let fixed_list = vec_col
+        let list_array = vec_col
             .as_any()
-            .downcast_ref::<FixedSizeListArray>()
-            .expect("downcast to FixedSizeListArray failed");
-        let values = fixed_list.values();
+            .downcast_ref::<arrow::array::FixedSizeListArray>()
+            .expect("vector is not a FixedSizeListArray");
+        let values = list_array.value(0);
         let float_array = values
             .as_any()
-            .downcast_ref::<Float32Array>()
-            .expect("downcast to Float32Array failed");
-        let dim = fixed_list.value_length() as usize;
-        (0..dim).map(|i| float_array.value(i)).collect()
+            .downcast_ref::<arrow::array::Float32Array>()
+            .expect("inner values not Float32Array");
+        float_array.iter().map(|v| v.unwrap_or(0.0)).collect()
     };
     println!("   Extracted sample query vector (dimension: {})", sample_vector.len());
 
@@ -65,7 +59,7 @@ async fn main() -> anyhow::Result<()> {
     println!("   Existing tables: {:?}", table_names);
 
     let table = if table_names.contains(&"chunks".to_string()) {
-        println!("   Table 'chunks' already exists. Opening it...");
+        println!("   Table 'chunks' already exists, opening...");
         db.open_table("chunks").execute().await?
     } else {
         println!("   Creating table 'chunks' from RecordBatches...");

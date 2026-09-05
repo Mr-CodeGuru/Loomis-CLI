@@ -45,15 +45,17 @@ if (Test-Path ".venv") {
 } else {
     try {
         uv venv --python 3.12 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "uv venv failed" }
         Report "Python venv" "OK" "Created via uv (Python 3.12)."
     } catch {
-        Report "Python venv" "FAILED" $_.Exception.Message
+        Report "Python venv" "FAILED" "uv venv failed - check uv is installed."
     }
 }
 
 try {
     & ".\.venv\Scripts\Activate.ps1"
     uv pip install -r requirements.txt 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "uv pip install failed" }
     Report "Python dependencies" "OK" "Installed/verified via uv."
 } catch {
     Report "Python dependencies" "FAILED" $_.Exception.Message
@@ -66,6 +68,7 @@ if (Test-Path $jinaCachePattern) {
 } else {
     try {
         python loadModels\loadJina.py
+        if ($LASTEXITCODE -ne 0) { throw "loadJina.py failed" }
         Report "Embedding model (jina-embeddings-v2-base-code)" "OK" "Downloaded and load-tested."
     } catch {
         Report "Embedding model (jina-embeddings-v2-base-code)" "FAILED" $_.Exception.Message
@@ -79,6 +82,7 @@ if (Test-Path $ggufPath) {
 } else {
     try {
         python loadModels\loadLlamaQ8.py
+        if ($LASTEXITCODE -ne 0) { throw "loadLlamaQ8.py failed" }
         Report "LLM model (Llama-3.2-1B-Instruct-Q8_0.gguf)" "OK" "Downloaded."
     } catch {
         Report "LLM model (Llama-3.2-1B-Instruct-Q8_0.gguf)" "FAILED" $_.Exception.Message
@@ -88,14 +92,75 @@ if (Test-Path $ggufPath) {
 # --- Step 5: Rust build ---
 try {
     cargo build 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
     Report "Rust build" "OK" "cargo build succeeded."
 } catch {
     Report "Rust build" "FAILED" $_.Exception.Message
 }
 
-# --- Step 6: parquet + LanceDB sanity checks ---
+# --- Step 6: parquet embeddings dataset ---
+if (-not (Test-Path "dbe")) {
+    New-Item -ItemType Directory -Path "dbe" -Force | Out-Null
+}
+$parquetPath = "dbe\embeddings.parquet"
+$parquetUrl = "https://huggingface.co/datasets/MrDevCoder01/LoomisDB/resolve/main/embeddings.parquet"
+
+if (Test-Path $parquetPath) {
+    Report "Parquet dataset (embeddings.parquet)" "SKIPPED" "Already downloaded."
+} else {
+    Write-Host "        Downloading embeddings.parquet (~240MB)..." -ForegroundColor DarkGray
+    $token = $env:HF_TOKEN
+    if (-not $token) { $token = $env:HUGGING_FACE_HUB_TOKEN }
+    if (-not $token) {
+        $hfTokenFile = Join-Path $env:USERPROFILE ".cache\huggingface\token"
+        if (Test-Path $hfTokenFile) {
+            $token = (Get-Content $hfTokenFile -Raw).Trim()
+        }
+    }
+    if (-not $token -and $env:HF_HOME) {
+        $hfHomeToken = Join-Path $env:HF_HOME "token"
+        if (Test-Path $hfHomeToken) {
+            $token = (Get-Content $hfHomeToken -Raw).Trim()
+        }
+    }
+
+    try {
+        if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+            $curlArgs = @("-#", "-fL", "--retry", "3", "--retry-delay", "2")
+            if ($token) {
+                $curlArgs += @("-H", "Authorization: Bearer $token")
+            }
+            $curlArgs += @($parquetUrl, "-o", $parquetPath)
+            & curl.exe @curlArgs
+            if ($LASTEXITCODE -ne 0) {
+                throw "curl.exe exited with code $LASTEXITCODE"
+            }
+        } else {
+            $headers = @{}
+            if ($token) {
+                $headers["Authorization"] = "Bearer $token"
+            }
+            $prevProgress = $ProgressPreference
+            $ProgressPreference = 'SilentlyContinue'
+            try {
+                Invoke-WebRequest -Uri $parquetUrl -OutFile $parquetPath -Headers $headers
+            } finally {
+                $ProgressPreference = $prevProgress
+            }
+        }
+        Report "Parquet dataset (embeddings.parquet)" "OK" "Downloaded."
+    } catch {
+        if (Test-Path $parquetPath) {
+            Remove-Item -Path $parquetPath -Force -ErrorAction SilentlyContinue
+        }
+        Report "Parquet dataset (embeddings.parquet)" "FAILED" "Download failed - verify network or set HF_TOKEN if private."
+    }
+}
+
+# --- Step 7: parquet + LanceDB sanity checks ---
 try {
     cargo run --example testParquet 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "testParquet failed" }
     Report "Parquet schema read (Rust)" "OK"
 } catch {
     Report "Parquet schema read (Rust)" "FAILED" $_.Exception.Message
@@ -106,13 +171,14 @@ if (Test-Path "dbe\lancedb\chunks.lance") {
 } else {
     try {
         cargo run --example convertLanceDB 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "convertLanceDB failed" }
         Report "LanceDB table" "OK" "Created and verified with a sample search."
     } catch {
         Report "LanceDB table" "FAILED" $_.Exception.Message
     }
 }
 
-# --- Step 7: llama-server (waits for the user) ---
+# --- Step 8: llama-server (waits for the user) ---
 Write-Host "`n[WAITING] llama-server" -ForegroundColor Cyan
 Write-Host "        This step needs YOU to start llama-server manually, in a separate terminal:" -ForegroundColor DarkGray
 Write-Host "        llama-server -m models\Llama-3.2-1B-Instruct-Q8_0.gguf -c 4096 --port 8080" -ForegroundColor White
@@ -121,6 +187,7 @@ Read-Host "        Press Enter once llama-server is running"
 
 try {
     cargo run --example testLlamaServer 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "testLlamaServer failed" }
     Report "llama-server connectivity" "OK" "Received a real completion."
 } catch {
     Report "llama-server connectivity" "FAILED" "Could not reach llama-server - confirm it's actually running on port 8080."

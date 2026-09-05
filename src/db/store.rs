@@ -23,11 +23,7 @@ pub struct VectorStore {
 impl VectorStore {
     pub fn resolve_paths() -> (PathBuf, PathBuf) {
         let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let base_dir = if root.join("dbe").exists() {
-            root.join("dbe")
-        } else {
-            root.join("db")
-        };
+        let base_dir = root.join("dbe");
         let db_path = base_dir.join("lancedb");
         let parquet_path = base_dir.join("embeddings.parquet");
         (db_path, parquet_path)

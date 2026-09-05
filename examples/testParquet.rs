@@ -9,12 +9,7 @@ use std::path::PathBuf;
 
 fn main() -> anyhow::Result<()> {
     let root = std::env::current_dir()?;
-    let base_dir = if root.join("dbe").exists() {
-        root.join("dbe")
-    } else {
-        root.join("db")
-    };
-    let path: PathBuf = base_dir.join("embeddings.parquet");
+    let path: PathBuf = root.join("dbe").join("embeddings.parquet");
     println!("Reading parquet from: {}\n", path.display());
 
     let file = File::open(&path)?;
@@ -40,7 +35,8 @@ fn main() -> anyhow::Result<()> {
     }
 
     let mut reader = builder.with_batch_size(1).build()?;
-    if let Some(Ok(batch)) = reader.next() {
+    if let Some(batch) = reader.next() {
+        let batch = batch?;
         println!("\n=== Sample row (first row, Arrow RecordBatch) ===");
         for (i, field) in arrow_schema.fields().iter().enumerate() {
             let col = batch.column(i);

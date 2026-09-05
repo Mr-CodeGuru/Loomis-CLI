@@ -10,12 +10,7 @@ use arrow::array::{Array, StringArray};
 
 fn main() -> anyhow::Result<()> {
     let root = std::env::current_dir()?;
-    let base_dir = if root.join("dbe").exists() {
-        root.join("dbe")
-    } else {
-        root.join("db")
-    };
-    let path: PathBuf = base_dir.join("embeddings.parquet");
+    let path: PathBuf = root.join("dbe").join("embeddings.parquet");
     println!("Scanning: {}\n", path.display());
 
     let file = File::open(&path)?;
@@ -51,15 +46,14 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    println!("Total rows checked : {}", total_rows);
-    println!("chunk_id vs id mismatches         : {}", id_mismatches);
+    println!("Total rows scanned: {}", total_rows);
+    println!("id vs chunk_id mismatches: {}", id_mismatches);
     println!("content_hash vs _content_hash mismatches: {}", hash_mismatches);
 
     if id_mismatches == 0 && hash_mismatches == 0 {
-        println!("\nPASS: Both column pairs are 100% byte-for-byte identical across all rows.");
-        println!("Decision confirmed: keep all columns in LanceDB schema (chunk_id designated primary key).");
+        println!("\nPASS: id == chunk_id and content_hash == _content_hash across all rows. Both are safe to collapse.");
     } else {
-        println!("\nFAIL: Mismatches detected. Do not treat columns as duplicates.");
+        println!("\nFAIL: differences detected, see above.");
     }
 
     Ok(())

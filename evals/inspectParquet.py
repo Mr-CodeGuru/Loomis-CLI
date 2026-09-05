@@ -12,8 +12,6 @@ import pyarrow.parquet as pq
 
 root = Path(__file__).parent.parent
 parquet_path = root / "dbe" / "embeddings.parquet"
-if not parquet_path.exists():
-    parquet_path = root / "db" / "embeddings.parquet"
 
 print(f"Reading schema from: {parquet_path}\n")
 

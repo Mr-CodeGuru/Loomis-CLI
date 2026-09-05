@@ -27,7 +27,7 @@ echo -e "\n\033[35m=== LoomisCLI Setup ===\033[0m\n"
 # --- Step 0: safety net -- strip any stray CRLF from shell scripts this script calls
 for f in scripts/init-structure.sh scripts/tree.sh init-structure.sh tree.sh; do
     if [[ -f "$f" ]]; then
-        sed -i 's/\r$//' "$f"
+        sed -i 's/\r$//' "$f" 2>/dev/null || sed -i '' 's/\r$//' "$f" 2>/dev/null || true
     fi
 done
 
@@ -97,7 +97,52 @@ else
     report "Rust build" "FAILED" "cargo build failed."
 fi
 
-# --- Step 6: parquet + LanceDB sanity checks ---
+# --- Step 6: parquet embeddings dataset ---
+mkdir -p dbe
+PARQUET_PATH="dbe/embeddings.parquet"
+PARQUET_URL="https://huggingface.co/datasets/MrDevCoder01/LoomisDB/resolve/main/embeddings.parquet"
+
+if [[ -f "$PARQUET_PATH" ]]; then
+    report "Parquet dataset (embeddings.parquet)" "SKIPPED" "Already downloaded."
+else
+    echo -e "\033[90m        Downloading embeddings.parquet (~240MB)...\033[0m"
+    TOKEN="${HF_TOKEN:-${HUGGING_FACE_HUB_TOKEN:-}}"
+    if [[ -z "$TOKEN" && -f "$HOME/.cache/huggingface/token" ]]; then
+        TOKEN=$(head -n 1 "$HOME/.cache/huggingface/token" 2>/dev/null | tr -d '[:space:]')
+    fi
+    if [[ -z "$TOKEN" && -n "${HF_HOME:-}" && -f "$HF_HOME/token" ]]; then
+        TOKEN=$(head -n 1 "$HF_HOME/token" 2>/dev/null | tr -d '[:space:]')
+    fi
+
+    AUTH_HEADER=()
+    if [[ -n "$TOKEN" ]]; then
+        AUTH_HEADER=(-H "Authorization: Bearer $TOKEN")
+    fi
+
+    if command -v curl > /dev/null 2>&1; then
+        if curl -# -fL --retry 3 --retry-delay 2 "${AUTH_HEADER[@]}" "$PARQUET_URL" -o "$PARQUET_PATH"; then
+            report "Parquet dataset (embeddings.parquet)" "OK" "Downloaded."
+        else
+            rm -f "$PARQUET_PATH"
+            report "Parquet dataset (embeddings.parquet)" "FAILED" "curl download failed — verify network or set HF_TOKEN if private."
+        fi
+    elif command -v wget > /dev/null 2>&1; then
+        WGET_HEADER=()
+        if [[ -n "$TOKEN" ]]; then
+            WGET_HEADER=(--header="Authorization: Bearer $TOKEN")
+        fi
+        if wget -q --show-progress "${WGET_HEADER[@]}" "$PARQUET_URL" -O "$PARQUET_PATH"; then
+            report "Parquet dataset (embeddings.parquet)" "OK" "Downloaded."
+        else
+            rm -f "$PARQUET_PATH"
+            report "Parquet dataset (embeddings.parquet)" "FAILED" "wget download failed — verify network or set HF_TOKEN if private."
+        fi
+    else
+        report "Parquet dataset (embeddings.parquet)" "FAILED" "Neither curl nor wget found."
+    fi
+fi
+
+# --- Step 7: parquet + LanceDB sanity checks ---
 if cargo run --example testParquet > /dev/null 2>&1; then
     report "Parquet schema read (Rust)" "OK"
 else
@@ -114,7 +159,7 @@ else
     fi
 fi
 
-# --- Step 7: llama-server (waits for the user) ---
+# --- Step 8: llama-server (waits for the user) ---
 echo -e "\n\033[36m[WAITING]\033[0m llama-server"
 echo -e "\033[90m        This step needs YOU to start llama-server manually, in a separate terminal:\033[0m"
 echo -e "        llama-server -m models/Llama-3.2-1B-Instruct-Q8_0.gguf -c 4096 --port 8080"
