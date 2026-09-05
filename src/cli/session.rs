@@ -2,7 +2,7 @@
 use std::io::{self, Write};
 use crate::config::AppConfig;
 use crate::db::VectorStore;
-use crate::llm::{build_rag_messages, ChatMessage, LlmClient};
+use crate::llm::{build_rag_messages, classify_query_intent, ChatMessage, LlmClient, QueryIntent};
 use crate::sidecar::SidecarClient;
 use super::commands::CommandHandler;
 
@@ -122,36 +122,43 @@ impl ReplSession {
     }
 
     async fn handle_query(&mut self, query: &str) -> Result<()> {
-        print!("🔍 Searching repository context... ");
-        io::stdout().flush()?;
+        let intent = classify_query_intent(query);
 
-        // 1. Compute embedding with sidecar
-        let query_vector = match self.sidecar.embed(query).await {
-            Ok(v) => v,
-            Err(e) => {
-                println!("\n[ERROR] Embedding failed: {e}");
-                return Ok(());
+        let chunks = if intent == QueryIntent::Greeting {
+            Vec::new()
+        } else {
+            print!("🔍 Searching repository context... ");
+            io::stdout().flush()?;
+
+            // 1. Compute embedding with sidecar
+            let query_vector = match self.sidecar.embed(query).await {
+                Ok(v) => v,
+                Err(e) => {
+                    println!("\n[ERROR] Embedding failed: {e}");
+                    return Ok(());
+                }
+            };
+
+            // 2. Query LanceDB for top-K chunks
+            let c = match self.vector_store.search(query_vector, self.config.top_k).await {
+                Ok(c) => c,
+                Err(e) => {
+                    println!("\n[ERROR] Vector search failed: {e}");
+                    return Ok(());
+                }
+            };
+
+            println!("done. (found {} relevant snippets)", c.len());
+
+            if !c.is_empty() {
+                println!("\nRetrieved Context Sources:");
+                for (idx, item) in c.iter().enumerate() {
+                    let name = if item.extracted_name.is_empty() { "block" } else { &item.extracted_name };
+                    println!("  [{}] {} ({}) [dist: {:.2}]", idx + 1, item.path, name, item.distance);
+                }
             }
+            c
         };
-
-        // 2. Query LanceDB for top-K chunks
-        let chunks = match self.vector_store.search(query_vector, self.config.top_k).await {
-            Ok(c) => c,
-            Err(e) => {
-                println!("\n[ERROR] Vector search failed: {e}");
-                return Ok(());
-            }
-        };
-
-        println!("done. (found {} relevant snippets)", chunks.len());
-
-        if !chunks.is_empty() {
-            println!("\nRetrieved Context Sources:");
-            for (idx, c) in chunks.iter().enumerate() {
-                let name = if c.extracted_name.is_empty() { "block" } else { &c.extracted_name };
-                println!("  [{}] {} ({}) [dist: {:.2}]", idx + 1, c.path, name, c.distance);
-            }
-        }
 
         // 3. Build RAG prompt
         let messages = build_rag_messages(query, &chunks, &self.history);
