@@ -1,23 +1,25 @@
 #!/usr/bin/env bash
-# scripts/init-structure.sh — macOS/Linux equivalent of init-structure.ps1
-# Reads STRUCTURE.txt and recreates base directories on disk (excludes Nightly directory)
-# Usage: bash scripts/init-structure.sh
+# scripts/nightly-init-structure.sh — reads NightStructure.txt and recreates directories on disk
+# Usage: bash scripts/nightly-init-structure.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 SRC_DIR="$ROOT_DIR/src"
-structure_file="$ROOT_DIR/STRUCTURE.txt"
 
+structure_file="$ROOT_DIR/NightStructure.txt"
 if [[ ! -f "$structure_file" ]]; then
-    structure_file="STRUCTURE.txt"
+    structure_file="$ROOT_DIR/Nightly/NightStructure.txt"
+fi
+if [[ ! -f "$structure_file" ]]; then
+    structure_file="NightStructure.txt"
 fi
 
 if [[ ! -f "$structure_file" ]]; then
-    echo "Error: could not find STRUCTURE.txt." >&2
+    echo "Error: could not find NightStructure.txt." >&2
     exit 1
 fi
 
-exclude_dirs='^(\.git|target|node_modules|\.venv|venv|__pycache__|\.cache|[Nn]ightly?)$'
+exclude_dirs='^(\.git|target|node_modules|\.venv|venv|__pycache__|\.cache)$'
 
 declare -a stack
 stack[0]="$ROOT_DIR"

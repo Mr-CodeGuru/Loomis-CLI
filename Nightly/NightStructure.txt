@@ -15,6 +15,12 @@ loadModels/
   loadJina.py
   loadLlamaQ8.py
 models/
+Nightly/
+  correction-Nightly-v1.0.0.md
+  correction-Nightly-v1.0.1.md
+  correction-Nightly-v1.0.2.md
+  correction-Nightly-v1.0.3.md
+  NightStructure.txt
 prompts/
   claude.md
   createdYet-2026-09-04-18-32.md
@@ -23,6 +29,10 @@ QTest/
 scripts/
   init-structure.ps1
   init-structure.sh
+  nightly-init-structure.ps1
+  nightly-init-structure.sh
+  nightly-tree.ps1
+  nightly-tree.sh
   tree.ps1
   tree.sh
 sidecar/
@@ -50,6 +60,7 @@ src/
 .gitignore
 Cargo.lock
 Cargo.toml
+NightStructure.txt
 README.md
 requirements.txt
 setup.ps1

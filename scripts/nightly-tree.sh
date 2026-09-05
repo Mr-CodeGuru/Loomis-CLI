@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
-# scripts/tree.sh — macOS/Linux equivalent of tree.ps1
-# Generates base STRUCTURE.txt snapshot (excludes Nightly directory and night* files)
-# Usage: bash scripts/tree.sh
+# scripts/nightly-tree.sh — generates NightStructure.txt snapshot for the Nightly branch
+# Usage: bash scripts/nightly-tree.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 SRC_DIR="$ROOT_DIR/src"
-output_file="$ROOT_DIR/STRUCTURE.txt"
+output_file="$ROOT_DIR/NightStructure.txt"
+nightly_copy="$ROOT_DIR/Nightly/NightStructure.txt"
 
-exclude_dirs='^(\.git|venv|\.venv|env|target|lancedb|node_modules|__pycache__|\.pytest_cache|\.mypy_cache|\.idea|\.vscode|\.cache|[Nn]ightly?)$'
+exclude_dirs='^(\.git|venv|\.venv|env|target|lancedb|node_modules|__pycache__|\.pytest_cache|\.mypy_cache|\.idea|\.vscode|\.cache)$'
 exclude_file_ext='\.(gguf|bin|safetensors|pt|pth|onnx|parquet|lance|DS_Store)$'
-exclude_files='^[Nn]ight.*'
 collapse_dirs='^(models|dbe)$'
 
 show_tree() {
@@ -38,7 +37,7 @@ show_tree() {
             fi
             subdirs+=("$entry")
         else
-            if [[ $is_inside_src -eq 0 && ("$base" =~ $exclude_file_ext || "$base" =~ $exclude_files) ]]; then
+            if [[ $is_inside_src -eq 0 && "$base" =~ $exclude_file_ext ]]; then
                 continue
             fi
             files+=("$entry")
@@ -62,4 +61,10 @@ show_tree() {
 }
 
 show_tree "$ROOT_DIR" "" > "$output_file"
+
+# Also sync a copy to Nightly/ directory if present
+if [[ -d "$ROOT_DIR/Nightly" ]]; then
+    cp "$output_file" "$nightly_copy"
+fi
+
 cat "$output_file"
