@@ -5,6 +5,7 @@ examples/
   checkDuplicateColumns.rs
   convertLanceDB.rs
   runQuestionSuite.rs
+  testCodeBlockFormatting.rs
   testConversationHistory.rs
   testLanceDbMethods.rs
   testLlamaServer.rs
@@ -21,8 +22,9 @@ Nightly/
   correction-Nightly-v1.0.1.md
   correction-Nightly-v1.0.2.md
   correction-Nightly-v1.0.3.md
-  correction-Nightly-v1.1.2.md
   correction-Nightly-v1.1.4.md
+  correction-Nightly-v1.1.5.md
+  correction-Nightly-v1.1.6.md
   NightStructure.txt
 prompts/
   claude.md
@@ -43,6 +45,7 @@ sidecar/
 src/
   cli/
     commands.rs
+    formatter.rs
     mod.rs
     session.rs
   db/

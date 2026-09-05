@@ -1,4 +1,4 @@
-# correction-Nightly-v1.1.2.md
+# correction-Nightly-v1.1.5.md
 
 Tracks required and optional fixes discovered while stabilizing LoomisCLI on the `Nightly`
 branch. Each entry is dated to the evidence that surfaced it, not guessed. `Nightly` accumulates
@@ -72,7 +72,7 @@ Implemented the strict two-phase semantic pipeline requested:
 
 ---
 
-## EMPIRICAL VERIFICATION (v1.1.2 Suite)
+## EMPIRICAL VERIFICATION (v1.1.5 Suite)
 
 Executed [`examples/testConversationHistory.rs`](file:///Users/aman/Desktop/EvaProjects/Loomis/CLI/LoomisCLI/examples/testConversationHistory.rs) against live `llama-server` and LanceDB:
 
@@ -122,4 +122,4 @@ Executed [`examples/testConversationHistory.rs`](file:///Users/aman/Desktop/EvaP
    - RAG: **Initiated** (Retrieved 5 chunks from `test/pacman/util.py`, `django-main/django/db/models/functions/text.py`, etc.).
    - Regeneration: Grounded Python MD5 checksum functions (`mkmd5sum`, `getmd5sum`, `md5_checksum`, `_calculate_md5_checksum`) citing the retrieved snippets.
 
-**Status**: **VERIFIED & RESOLVED in v1.1.2**.
+**Status**: **VERIFIED & RESOLVED in v1.1.5**.

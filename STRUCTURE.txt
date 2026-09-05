@@ -5,6 +5,7 @@ examples/
   checkDuplicateColumns.rs
   convertLanceDB.rs
   runQuestionSuite.rs
+  testCodeBlockFormatting.rs
   testConversationHistory.rs
   testLanceDbMethods.rs
   testLlamaServer.rs
@@ -31,6 +32,7 @@ sidecar/
 src/
   cli/
     commands.rs
+    formatter.rs
     mod.rs
     session.rs
   db/

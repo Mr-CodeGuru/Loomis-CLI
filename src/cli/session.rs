@@ -5,6 +5,7 @@ use crate::db::VectorStore;
 use crate::llm::{build_rag_messages, fallback_classify_code_intent, ChatMessage, CodeIntent, LlmClient};
 use crate::sidecar::SidecarClient;
 use super::commands::CommandHandler;
+use super::formatter::StreamingCodeFormatter;
 
 pub struct ReplSession {
     config: AppConfig,
@@ -176,15 +177,16 @@ impl ReplSession {
         let messages = build_rag_messages(query, &chunks, &self.history, intent);
 
         println!("\n--- Loomis ---");
+        let mut formatter = StreamingCodeFormatter::new();
         let stream_result = self
             .llm
             .stream_chat(&messages, |token| {
-                print!("{token}");
-                io::stdout().flush()?;
+                formatter.process_chunk(token)?;
                 Ok(())
             })
             .await;
 
+        formatter.finish()?;
         println!(); // trailing newline
 
         match stream_result {
