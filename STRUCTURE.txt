@@ -5,6 +5,7 @@ examples/
   checkDuplicateColumns.rs
   convertLanceDB.rs
   runQuestionSuite.rs
+  testConversationHistory.rs
   testLanceDbMethods.rs
   testLlamaServer.rs
   testLlamaStreaming.rs

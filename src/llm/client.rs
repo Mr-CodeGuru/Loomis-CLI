@@ -76,6 +76,11 @@ impl LlmClient {
     }
 
     pub async fn classify_code_intent(&self, query: &str) -> Result<CodeIntent> {
+        // Fast-path: Check unambiguous code signals first (0ms latency, eliminates small model blindspots)
+        if super::prompt::is_explicit_code_request(query) {
+            return Ok(CodeIntent::Code);
+        }
+
         let headers = self.build_headers()?;
         let system_prompt = "\
 You are a classification tool. Your only job is to categorize user queries as either CODE (if the user asks for code to be written, generated, implemented, refactored, or demonstrated, including questions like 'how would you write...', 'can you implement...') or CHAT (if the user is greeting, chatting, asking general non-code questions, or asking what you can do). Do not write code. Reply with ONLY the single word 'CODE' or 'CHAT'.";

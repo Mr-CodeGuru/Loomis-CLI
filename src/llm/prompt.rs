@@ -7,26 +7,42 @@ pub enum CodeIntent {
     Chat,
 }
 
-pub fn fallback_classify_code_intent(query: &str) -> CodeIntent {
+/// Strict, high-precision detection for explicit code requests.
+/// Returns true if the query contains unambiguous code-seeking signals.
+pub fn is_explicit_code_request(query: &str) -> bool {
     let lower = query.trim().to_lowercase();
 
-    // Strict allow-list keywords for code-seeking requests
     let code_patterns = [
-        "write a", "write python", "write rust", "write code", "implement",
-        "generate a", "create a function", "create a class", "create a script",
-        "refactor", "extend the", "build a function", "how would you write",
-        "how would you code", "how would you implement", "can you write",
-        "can you implement", "can you code", "show me an example of code",
-        "give me a function", "def ", "class ", "fn "
+        // Direct code phrases
+        "give me code", "give me a code", "show me code", "write code", "need code",
+        "code about", "code for", "code to", "code that", "code snippet",
+        "sample code", "example code",
+        // Direct verbs & imperatives
+        "write a ", "write an ", "write python", "write rust", "write bash",
+        "write javascript", "write c ", "write c++", "write go ",
+        "implement ", "implementing ", "refactor", "extend the ", "generate a ",
+        "generate code", "create a function", "create a class", "create a script",
+        "create a module", "build a function", "build a class", "build a script",
+        // Code-seeking questions
+        "how would you write", "how would you code", "how would you implement",
+        "can you write", "can you implement", "can you code",
+        "give me a function", "show me a function", "show me an example of code",
+        // Specific coding terms & syntax
+        "def ", "class ", "fn ", "struct ", "enum ",
+        "function to ", "function that ", "script to ", "script that ",
+        "method to ", "method that ", "algorithm for ", "algorithm to ",
+        "checksum", "hash of", "sha256", "md5", "context manager",
     ];
 
-    for pat in &code_patterns {
-        if lower.contains(pat) {
-            return CodeIntent::Code;
-        }
-    }
+    code_patterns.iter().any(|&pat| lower.contains(pat))
+}
 
-    CodeIntent::Chat
+pub fn fallback_classify_code_intent(query: &str) -> CodeIntent {
+    if is_explicit_code_request(query) {
+        CodeIntent::Code
+    } else {
+        CodeIntent::Chat
+    }
 }
 
 pub fn build_rag_messages(
@@ -40,11 +56,12 @@ pub fn build_rag_messages(
     let system_instruction = match intent {
         CodeIntent::Chat => "\
 You are Loomis, an expert terminal-based local code assistant.
-Respond to the user politely, helpfully, and concisely.
-Do NOT generate or output code blocks for greetings or conversational inquiries.",
+You maintain awareness of this conversation session. The chat history contains previous messages exchanged with the user in this session. Answer questions about previous turns accurately.
+Respond helpfully and concisely. Do not output unrequested code blocks.",
 
         CodeIntent::Code => "\
 You are Loomis, an expert terminal-based local code assistant.
+You maintain awareness of this conversation session and previous discussion.
 You help the user by writing clean code that follows the style, patterns, and conventions found in the retrieved repository snippets.
 
 STRICT INSTRUCTIONS:
@@ -53,7 +70,8 @@ STRICT INSTRUCTIONS:
 3. Only import libraries and call functions that are strictly necessary. Never add dead or unused imports.
 4. In your explanation, describe ONLY the code you actually wrote. Do NOT list or discuss functions, libraries, or modules not present in your code.
 5. Explicitly cite which retrieved snippet file path and symbol your code adapts.
-6. Keep your response direct, clean, and concise.",
+6. If the user is asking to modify, extend, or refine code from a prior turn in this session, adapt the previous solution while respecting repository patterns.
+7. Keep your response direct, clean, and concise.",
     };
 
     messages.push(ChatMessage {
@@ -61,12 +79,23 @@ STRICT INSTRUCTIONS:
         content: system_instruction.to_string(),
     });
 
-    // Append recent sanitized session turns (keep at most the last 4 messages = 2 conversation turns)
-    let history_slice = if history.len() > 4 {
-        &history[history.len() - 4..]
-    } else {
-        history
+    // Adaptive history window:
+    // - For Chat: up to 10 messages (5 turns), max 4000 characters total.
+    // - For Code: up to 6 messages (3 turns), max 1500 characters total, reserving tokens for retrieved snippets.
+    let (max_msgs, max_chars) = match intent {
+        CodeIntent::Chat => (10, 4000),
+        CodeIntent::Code => (6, 1500),
     };
+
+    let start_idx = history.len().saturating_sub(max_msgs);
+    let mut history_slice = &history[start_idx..];
+
+    // Calculate total character count and trim oldest turns if exceeding budget
+    let mut total_chars: usize = history_slice.iter().map(|m| m.content.len()).sum();
+    while total_chars > max_chars && history_slice.len() > 2 {
+        total_chars -= history_slice[0].content.len() + history_slice[1].content.len();
+        history_slice = &history_slice[2..];
+    }
 
     for msg in history_slice {
         // Skip poisoned refusals from contaminating context
@@ -94,7 +123,7 @@ STRICT INSTRUCTIONS:
                 };
 
                 context_block.push_str(&format!(
-                    "\n[Snippet {}] File: {} | Symbol: {} | Lang: {}\n```{}\n{}\n```\n",
+                    "\n[Snippet {}] File: {} | Symbol: {} | Lang: {}\n```{}\\n{}\\n```\n",
                     i + 1,
                     chunk.path,
                     symbol_label,

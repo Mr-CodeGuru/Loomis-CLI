@@ -1,4 +1,4 @@
-﻿# scripts/init-structure.ps1 — reads STRUCTURE.txt and recreates directories on disk.
+﻿# scripts/init-structure.ps1 — reads STRUCTURE.txt and recreates base directories on disk.
 # Usage: powershell -ExecutionPolicy Bypass -File scripts/init-structure.ps1
 
 $rootDir = Split-Path -Parent $PSScriptRoot
@@ -16,7 +16,7 @@ if (-not (Test-Path $structureFile)) {
 }
 
 # Directories to exclude from recreation if they somehow appear in STRUCTURE.txt (never applied inside src/)
-$excludeDirs = @('.git', 'target', 'node_modules', '.venv', 'venv', '__pycache__', '.cache')
+$excludeDirs = @('.git', 'target', 'node_modules', '.venv', 'venv', '__pycache__', '.cache', 'Nightly', 'nightly', 'Night', 'night')
 
 $lines = Get-Content $structureFile | Where-Object { $_ -notmatch '^```' -and $_.Trim() -ne "" }
 

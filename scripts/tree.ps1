@@ -1,4 +1,4 @@
-﻿# scripts/tree.ps1 — prints project structure: all directories, skips large/binary files by pattern.
+﻿# scripts/tree.ps1 — prints base project structure to STRUCTURE.txt (excludes Nightly directory and night* files)
 # Usage: powershell -ExecutionPolicy Bypass -File scripts/tree.ps1
 
 $rootDir = Split-Path -Parent $PSScriptRoot
@@ -6,9 +6,9 @@ if (-not $rootDir) { $rootDir = "." }
 $srcDir = Join-Path $rootDir "src"
 
 # Directories that should be ignored at root or transiently (never applied inside src/)
-$excludeDirs = @('.git', 'venv', '.venv', 'env', 'target', 'lancedb', 'node_modules', '__pycache__', '.pytest_cache', '.mypy_cache', '.idea', '.vscode', '.cache')
+$excludeDirs = @('.git', 'venv', '.venv', 'env', 'target', 'lancedb', 'node_modules', '__pycache__', '.pytest_cache', '.mypy_cache', '.idea', '.vscode', '.cache', 'Nightly', 'nightly', 'Night', 'night')
 # Large binary/artifact file extensions (never applied inside src/)
-$excludeFileExt = @('.gguf', '.bin', '.safetensors', '.pt', '.pth', '.onnx', '.parquet', '.lance')
+$excludeFileExt = @('.gguf', '.bin', '.safetensors', '.pt', '.pth', '.onnx', '.parquet', '.lance', '.DS_Store')
 # Directories shown as a placeholder only — contents not recursed into (e.g. models, dbe)
 $collapseDirs = @('models', 'dbe')
 
@@ -25,8 +25,12 @@ function Show-Tree {
         if ($isInsideSrc) {
             return $true
         }
-        # Filter out transient/build directories
+        # Filter out transient/build directories and Nightly directory
         if ($_.PSIsContainer -and $excludeDirs -contains $_.Name) {
+            return $false
+        }
+        # Filter out night/nightly files from base structure
+        if (-not $_.PSIsContainer -and $_.Name -match '^[Nn]ight') {
             return $false
         }
         return $true
